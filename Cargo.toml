@@ -8,6 +8,8 @@ readme = "README.md"
 license = "MIT"
 keywords = ["ebml", "encoding", "parser", "serialization"]
 categories = ["parsing", "data-structures", "encoding", "multimedia::encoding"]
+homepage = "https://github.com/austinleroy/ebml-iterable"
+repository = "https://github.com/austinleroy/ebml-iterable"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
