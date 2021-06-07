@@ -46,8 +46,8 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 /// # }
 /// 
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let mut file = File::open("my_ebml_file.ebml")?;
-/// let mut my_iterator: TagIterator<TSpecImpl> = TagIterator::new(&mut file, &[]);
+/// let file = File::open("my_ebml_file.ebml")?;
+/// let mut my_iterator: TagIterator<_, TSpecImpl> = TagIterator::new(file, &[]);
 /// for tag in my_iterator {
 ///   println!("{:?}", tag?.tag);
 /// }
@@ -57,12 +57,12 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 /// 
 
 
-pub struct TagIterator<'a, TSpec> 
+pub struct TagIterator<R: Read, TSpec> 
     where 
     TSpec: TagSpec + Default,
     TSpec::SpecType: Eq + Hash
 {
-    source: &'a mut dyn Read,
+    source: R,
     spec: TSpec,
     tags_to_buffer: HashSet<TSpec::SpecType>,
     buffer_all: bool,
@@ -75,7 +75,7 @@ pub struct TagIterator<'a, TSpec>
     tag_stack: Vec<ProcessingTag<TSpec>>,
 }
 
-impl<'a, TSpec> TagIterator<'a, TSpec>
+impl<R: Read, TSpec> TagIterator<R, TSpec>
     where 
     TSpec: TagSpec + Default,
     TSpec::SpecType: Eq + Hash
@@ -86,7 +86,7 @@ impl<'a, TSpec> TagIterator<'a, TSpec>
     ///
     /// The `source` parameter must implement [`std::io::Read`].  The second argument, `tags_to_buffer`, specifies which "Master" tags should be read as [`EbmlTag::FullTag`]s rather than as [`EbmlTag::StartTag`] and [`EbmlTag::EndTag`]s.  Refer to the documentation on [`TagIterator`] for more explanation of how to use the returned instance.
     ///
-    pub fn new(source: &'a mut dyn Read, tags_to_buffer: &[TSpec::SpecType]) -> Self {
+    pub fn new(source: R, tags_to_buffer: &[TSpec::SpecType]) -> Self {
         TagIterator::with_capacity(source, tags_to_buffer, DEFAULT_BUFFER_LEN)
     }
     
@@ -95,7 +95,7 @@ impl<'a, TSpec> TagIterator<'a, TSpec>
     ///
     /// This initializes the `TagIterator` with a specific byte capacity.  The iterator will still reallocate if necessary. (Reallocation occurs if the iterator comes across a tag that should be output as a [`EbmlTag::FullTag`] and its size in bytes is greater than the iterator's current buffer capacity.)
     ///
-    pub fn with_capacity(source: &'a mut dyn Read, tags_to_buffer: &[TSpec::SpecType], capacity: usize) -> Self {
+    pub fn with_capacity(source: R, tags_to_buffer: &[TSpec::SpecType], capacity: usize) -> Self {
         let buffer = vec![0;capacity];
 
         TagIterator {
@@ -201,7 +201,7 @@ impl<'a, TSpec> TagIterator<'a, TSpec>
             let data_tag_type = match spec_tag_type {
                 SpecTagType::Master => {
                     let mut src = Cursor::new(data);
-                    let mut sub_iterator: TagIterator<TSpec> = TagIterator::new(&mut src, &[]);
+                    let mut sub_iterator: TagIterator<_, TSpec> = TagIterator::new(&mut src, &[]);
                     sub_iterator.buffer_all = true;
 
                     let children: Result<Vec<DataTag>, TagIteratorError> = sub_iterator.map(|c| {
@@ -246,7 +246,7 @@ pub struct SpecTag<TSpec>
     pub tag: EbmlTag
 }
 
-impl<'a, TSpec> Iterator for TagIterator<'a, TSpec>
+impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
     where TSpec: TagSpec + Default,
     TSpec::SpecType: Eq + Hash
 {

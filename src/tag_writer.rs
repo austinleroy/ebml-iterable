@@ -30,14 +30,14 @@ use super::errors::tag_writer::TagWriterError;
 /// ```
 ///
 
-pub struct TagWriter<'a> {
-    dest: &'a mut dyn Write,
+pub struct TagWriter<W: Write> {
+    dest: W,
     open_tags: Vec<(u64, usize)>,
     working_buffer: Vec<u8>,
 }
 
-impl<'a> TagWriter<'a> {
-    pub fn new(dest: &'a mut dyn Write) -> Self {
+impl<W: Write> TagWriter<W> {
+    pub fn new(dest: W) -> Self {
         TagWriter {
             dest,
             open_tags: Vec::new(),
