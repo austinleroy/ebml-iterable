@@ -6,6 +6,30 @@ use super::tags::{DataTag, DataTagType, EbmlTag};
 
 use super::errors::tag_writer::TagWriterError;
 
+///
+/// Provides a tool to write EBML files based on Tags.  Writes to a destination that implements [`std::io::Write`].
+///
+/// Unlike the [TagIterator][`super::TagIterator`], this does not require a specification to write data. The reason for this is that tags passed into this writer *must* provide the tag id, and these tags by necessity have their data in a format that can be encoded to binary. Because a specification is really only useful for providing context for tags based on the tag id, there is little value in using a specification during writing (other than ensuring that tag data matches the format described by the specification, which is not currently implemented.)  The `TagWriter` can  write any `EbmlTag` objects regardless of whether they came from a `TagIterator` or not.
+///
+/// ## Example
+/// 
+/// ```no_run
+/// use std::fs::File;
+/// use ebml_iterable::TagWriter;
+/// use ebml_iterable::tags::{EbmlTag, DataTag, DataTagType};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut file = File::create("my_ebml_file.ebml")?;
+/// let mut my_writer = TagWriter::new(&mut file);
+/// my_writer.write(EbmlTag::FullTag(DataTag { 
+///   id: 0x1a45dfa3, 
+///   data_type: DataTagType::Master(Vec::new()) 
+/// }))?;
+/// # Ok(())
+/// # }
+/// ```
+///
+
 pub struct TagWriter<'a> {
     dest: &'a mut dyn Write,
     open_tags: Vec<(u64, usize)>,

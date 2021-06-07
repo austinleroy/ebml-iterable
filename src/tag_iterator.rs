@@ -20,6 +20,43 @@ struct ProcessingTag<TSpec>
 
 const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 
+///
+/// Provides an iterator over EBML files (read from a source implementing the [`std::io::Read`] trait). Can be configured to read specific "Master" tags as complete objects rather than just emitting when they start and end.
+/// 
+/// This is a generic struct that requires a specification implementing [`TagSpec`]. No specifications are included in this crate - you will need to either use another crate providing a spec (such as the Matroska spec implemented in the [webm-iterable](https://crates.io/crates/webm_iterable) or write your own spec if you want to iterate over a custom EBML file. The iterator outputs `SpecTag<TSpec>` objects containing data on the type of tag (defined by the specification) and the tag data. The tag data is stored in an [`EbmlTag`] enum member.  "Master" tags (defined by the specification) usually will be read as `StartTag` and `EndTag` variants, while all other tags will have their complete data within the `FullTag` variant.  The iterator can be configured to buffer Master tags into a `FullTag` variant using the `tags_to_buffer` parameter.
+/// 
+/// Note: The [`Self::with_capacity()`] method can be used to construct a `TagIterator` with a specified default buffer size.  This is only useful as a microoptimization to memory management if you know the maximum tag size of the file you're reading.
+/// 
+/// ## Example
+/// 
+/// ```no_run
+/// use std::fs::File;
+/// use ebml_iterable::TagIterator;
+/// #
+/// # use ebml_iterable::specs::{TagSpec, SpecTagType};
+/// # #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+/// # enum FooSpec { Bar }
+/// # #[derive(Default)]
+/// # struct TSpecImpl { }
+/// #
+/// # impl TagSpec for TSpecImpl {
+/// #   type SpecType = FooSpec;
+/// #   fn get_tag(&self, id: u64) -> Self::SpecType { FooSpec::Bar }
+/// #   fn get_tag_type(&self, tag: &Self::SpecType) -> SpecTagType { SpecTagType::UnsignedInt }
+/// # }
+/// 
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut file = File::open("my_ebml_file.ebml")?;
+/// let mut my_iterator: TagIterator<TSpecImpl> = TagIterator::new(&mut file, &[]);
+/// for tag in my_iterator {
+///   println!("{:?}", tag?.tag);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+/// 
+
+
 pub struct TagIterator<'a, TSpec> 
     where 
     TSpec: TagSpec + Default,
@@ -43,10 +80,21 @@ impl<'a, TSpec> TagIterator<'a, TSpec>
     TSpec: TagSpec + Default,
     TSpec::SpecType: Eq + Hash
 {
+
+    /// 
+    /// Returns a new `TagIterator<TSpec>` instance.
+    ///
+    /// The `source` parameter must implement [`std::io::Read`].  The second argument, `tags_to_buffer`, specifies which "Master" tags should be read as [`EbmlTag::FullTag`]s rather than as [`EbmlTag::StartTag`] and [`EbmlTag::EndTag`]s.  Refer to the documentation on [`TagIterator`] for more explanation of how to use the returned instance.
+    ///
     pub fn new(source: &'a mut dyn Read, tags_to_buffer: &[TSpec::SpecType]) -> Self {
         TagIterator::with_capacity(source, tags_to_buffer, DEFAULT_BUFFER_LEN)
     }
     
+    ///
+    /// Returns a new `TagIterator<TSpec>` instance with the specified internal buffer capacity.
+    ///
+    /// This initializes the `TagIterator` with a specific byte capacity.  The iterator will still reallocate if necessary. (Reallocation occurs if the iterator comes across a tag that should be output as a [`EbmlTag::FullTag`] and its size in bytes is greater than the iterator's current buffer capacity.)
+    ///
     pub fn with_capacity(source: &'a mut dyn Read, tags_to_buffer: &[TSpec::SpecType], capacity: usize) -> Self {
         let buffer = vec![0;capacity];
 
@@ -185,6 +233,11 @@ impl<'a, TSpec> TagIterator<'a, TSpec>
     }
 }
 
+///
+/// A struct holding EBML tag data.  Emitted by [`TagIterator`].
+///
+/// This struct houses the `SpecType` and tag data for items emitted by the `TagIterator`. The `spec_type` is simply an enum value representing the tag type (this is pulled from `TSpec` based on the tag id present in the data being read) and may be ignored if you prefer to work directly with the u64 tag ids. The `tag` contains the actual data enclosed in the tag along with the tag id.
+/// 
 pub struct SpecTag<TSpec> 
     where TSpec: TagSpec + Default,
     TSpec::SpecType: Eq + Hash
