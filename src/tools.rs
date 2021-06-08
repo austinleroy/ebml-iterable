@@ -1,3 +1,7 @@
+//! 
+//! Contains a number of tools that are useful when working with EBML encoded files.
+//! 
+
 use std::convert::TryInto;
 
 use super::errors::tool::ToolError;
@@ -42,6 +46,11 @@ impl Vint for u64 {
     }
 }
 
+/// 
+/// Reads a vint from the beginning of the input array slice.
+/// 
+/// This method returns an option with the `None` variant used to indicate there was not enough data in the buffer to completely read a vint.  This method can return a `ToolError` if the input array cannot be read as a vint.
+/// 
 pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
     if buffer.is_empty() {
         return Ok(None);
@@ -68,6 +77,22 @@ pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
     Ok(Some((value, length)))
 }
 
+///
+/// Reads a `u64` value from any length array slice.
+/// 
+/// Rather than forcing the input to be a `[u8; 8]` like standard library methods, this can interpret a `u64` from a slice of any length < 8.  Bytes are assumed to be least significant when reading the value - i.e. an array of `[4, 0]` would return a value of `1024`.  Will return an error if the input slice has a length > 8.
+/// 
+/// ## Example
+/// 
+/// ```
+/// # use ebml_iterable::tools::arr_to_u64;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let result = arr_to_u64(&[16,0])?;
+/// assert_eq!(result, 4096);
+/// # Ok(())
+/// # }
+/// ```
+/// 
 pub fn arr_to_u64(arr: &[u8]) -> Result<u64, ToolError> {
     if arr.len() > 8 {
         return Err(ToolError::ReadU64Overflow(Vec::from(arr)));
@@ -81,6 +106,22 @@ pub fn arr_to_u64(arr: &[u8]) -> Result<u64, ToolError> {
     Ok(val)
 }
 
+///
+/// Reads an `i64` value from any length array slice.
+/// 
+/// Rather than forcing the input to be a `[u8; 8]` like standard library methods, this can interpret an `i64` from a slice of any length < 8.  Bytes are assumed to be least significant when reading the value - i.e. an array of `[4, 0]` would return a value of `1024`.  Will return an error if the input slice has a length > 8.
+/// 
+/// ## Example
+/// 
+/// ```
+/// # use ebml_iterable::tools::arr_to_i64;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let result = arr_to_i64(&[4,0])?;
+/// assert_eq!(result, 1024);
+/// # Ok(())
+/// # }
+/// ```
+///
 pub fn arr_to_i64(arr: &[u8]) -> Result<i64, ToolError> {
     if arr.len() > 8 {
         return Err(ToolError::ReadI64Overflow(Vec::from(arr)));
@@ -97,6 +138,11 @@ pub fn arr_to_i64(arr: &[u8]) -> Result<i64, ToolError> {
     }
 }
 
+///
+/// Reads an `f64` value from an array slice of length 4 or 8.
+/// 
+/// This method wraps `f32` and `f64` conversions from big endian byte arrays and casts the result as an `f64`.  Will throw an error if the input slice length is not 4 or 8.
+/// 
 pub fn arr_to_f64(arr: &[u8]) -> Result<f64, ToolError> {
     if arr.len() == 4 {
         Ok(f32::from_be_bytes(arr.try_into().unwrap()) as f64)

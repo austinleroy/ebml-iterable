@@ -1,9 +1,9 @@
 ///
-/// `EbmlTag` is an enumeration containing three different classifications of tags that this library understands:
+/// `TagPosition` is an enumeration containing three different tag "positions" that this library works with:
 ///
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum EbmlTag {
+pub enum TagPosition {
 
     ///
     /// A marker for the beginning of a "master" tag as defined in EBML.  Master tags are simply containers for other tags.  The u64 value is the "id" of the tag.
@@ -16,44 +16,33 @@ pub enum EbmlTag {
     EndTag(u64),
 
     ///
-    /// A complete tag that includes both the id and full data of the tag.  See [`DataTag`] for more detail.
+    /// A complete tag that includes both the id and full data of the tag.  See [`TagData`] for more detail.
     ///
-    FullTag(DataTag),
+    FullTag(u64, TagData),
 }
 
 
-impl EbmlTag {
+impl TagPosition {
     pub fn start_tag(&self) -> Option<u64> {
         match &self {
-            EbmlTag::StartTag(id) => Some(*id),
+            TagPosition::StartTag(id) => Some(*id),
             _ => None
         }
     }
 
     pub fn end_tag(&self) -> Option<u64> {
         match &self {
-            EbmlTag::EndTag(id) => Some(*id),
+            TagPosition::EndTag(id) => Some(*id),
             _ => None
         }
     }
 
-    pub fn full_tag(self) -> Option<DataTag> {
+    pub fn full_tag(self) -> Option<(u64, TagData)> {
         match self {
-            EbmlTag::FullTag(data) => Some(data),
+            TagPosition::FullTag(id, data) => Some((id, data)),
             _ => None
         }
     }
-}
-
-///
-/// Holds a tag id along with the tag data.
-///
-/// A DataTag is a simple struct containing a tag id and the tag "data_type".  It is important to note that the type of data contained in the tag directly corresponds to the tag id as defined in whichever specification is in use.  Take care when creating this struct - specifying the wrong data type for a tag can result in corrupted output.
-///
-#[derive(PartialEq, Debug, Clone)]
-pub struct DataTag {
-    pub id: u64,
-    pub data_type: DataTagType,
 }
 
 ///
@@ -65,12 +54,12 @@ pub struct DataTag {
 /// 
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum DataTagType {
+pub enum TagData {
 
     ///
     /// A complete master tag containing any number of child tags.
     ///
-    Master(Vec<DataTag>),
+    Master(Vec<(u64, TagData)>),
 
     ///
     /// An unsigned integer.
@@ -98,45 +87,45 @@ pub enum DataTagType {
     Float(f64),
 }
 
-impl DataTagType {
-    pub fn master(self) -> Option<Vec<DataTag>> {
+impl TagData {
+    pub fn master(self) -> Option<Vec<(u64, TagData)>> {
         match self {
-            DataTagType::Master(children) => Some(children),
+            TagData::Master(children) => Some(children),
             _ => None
         }
     }
 
     pub fn unsigned_int(&self) -> Option<u64> {
         match &self {
-            DataTagType::UnsignedInt(val) => Some(*val),
+            TagData::UnsignedInt(val) => Some(*val),
             _ => None
         }
     }
 
     pub fn integer(&self) -> Option<i64> {
         match &self {
-            DataTagType::Integer(val) => Some(*val),
+            TagData::Integer(val) => Some(*val),
             _ => None
         }
     }
 
     pub fn utf8(self) -> Option<String> {
         match self {
-            DataTagType::Utf8(val) => Some(val),
+            TagData::Utf8(val) => Some(val),
             _ => None
         }
     }
 
     pub fn binary(self) -> Option<Vec<u8>> {
         match self {
-            DataTagType::Binary(val) => Some(val),
+            TagData::Binary(val) => Some(val),
             _ => None
         }
     }
 
     pub fn float(&self) -> Option<f64> {
         match &self {
-            DataTagType::Float(val) => Some(*val),
+            TagData::Float(val) => Some(*val),
             _ => None
         }
     }

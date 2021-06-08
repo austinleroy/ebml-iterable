@@ -5,7 +5,7 @@
 //! [MKV][mkv].
 //! 
 //! # Important - Specifications
-//! The iterator contained in this crate is spec-agnostic and requires a specification implementing the [`specs::TagSpec`] trait to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
+//! The iterator contained in this crate is spec-agnostic and requires a specification implementing the [`specs::EbmlSpecification`] trait to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
 //! 
 //! # Known Limitations
 //! This library was not built to work with an "Unknown Data Size" as defined in [RFC8794][rfc8794]. As such, it likely will not support streaming applications and will only work on complete datasets.

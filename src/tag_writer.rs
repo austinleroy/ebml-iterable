@@ -2,29 +2,26 @@ use std::io::Write;
 use std::convert::{TryInto, TryFrom};
 
 use super::tools::Vint;
-use super::tags::{DataTag, DataTagType, EbmlTag};
+use super::tags::{TagPosition, TagData};
 
 use super::errors::tag_writer::TagWriterError;
 
 ///
 /// Provides a tool to write EBML files based on Tags.  Writes to a destination that implements [`std::io::Write`].
 ///
-/// Unlike the [TagIterator][`super::TagIterator`], this does not require a specification to write data. The reason for this is that tags passed into this writer *must* provide the tag id, and these tags by necessity have their data in a format that can be encoded to binary. Because a specification is really only useful for providing context for tags based on the tag id, there is little value in using a specification during writing (other than ensuring that tag data matches the format described by the specification, which is not currently implemented.)  The `TagWriter` can  write any `EbmlTag` objects regardless of whether they came from a `TagIterator` or not.
+/// Unlike the [TagIterator][`super::TagIterator`], this does not require a specification to write data. The reason for this is that tags passed into this writer *must* provide the tag id, and these tags by necessity have their data in a format that can be encoded to binary. Because a specification is really only useful for providing context for tags based on the tag id, there is little value in using a specification during writing (other than ensuring that tag data matches the format described by the specification, which is not currently implemented.)  The `TagWriter` can  write any `TagPosition` objects regardless of whether they came from a `TagIterator` or not.
 ///
 /// ## Example
 /// 
 /// ```no_run
 /// use std::fs::File;
 /// use ebml_iterable::TagWriter;
-/// use ebml_iterable::tags::{EbmlTag, DataTag, DataTagType};
+/// use ebml_iterable::tags::{TagPosition, TagData};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut file = File::create("my_ebml_file.ebml")?;
 /// let mut my_writer = TagWriter::new(&mut file);
-/// my_writer.write(EbmlTag::FullTag(DataTag { 
-///   id: 0x1a45dfa3, 
-///   data_type: DataTagType::Master(Vec::new()) 
-/// }))?;
+/// my_writer.write(TagPosition::FullTag(0x1a45dfa3, TagData::Master(Vec::new())))?;
 /// # Ok(())
 /// # }
 /// ```
@@ -63,40 +60,39 @@ impl<W: Write> TagWriter<W> {
         }
     }
 
-    fn write_full_tag(&mut self, tag: DataTag) -> Result<(), TagWriterError> {
+    fn write_full_tag(&mut self, id: u64, data: TagData) -> Result<(), TagWriterError> {
         let mut size: u64 = 0;
-        match tag.data_type {
-            DataTagType::Master(children) => {
-                self.write(EbmlTag::StartTag(tag.id))?;
+        match data {
+            TagData::Master(children) => {
+                self.write(TagPosition::StartTag(id))?;
                 for child in children {
-                    self.write(EbmlTag::FullTag(child))?;
+                    self.write(TagPosition::FullTag(child.0, child.1))?;
                 }
-                self.write(EbmlTag::EndTag(tag.id))?;
+                self.write(TagPosition::EndTag(id))?;
                 return Ok(());
             },
-            DataTagType::UnsignedInt(val) => 
+            TagData::UnsignedInt(val) => 
                 u8::try_from(val).map(|n| { self.working_buffer.extend_from_slice(&n.to_be_bytes()); size = 1; })
                     .or_else(|_| u16::try_from(val).map(|n| { self.working_buffer.extend_from_slice(&n.to_be_bytes()); size = 2; }))
                     .or_else(|_| u32::try_from(val).map(|n| { self.working_buffer.extend_from_slice(&n.to_be_bytes()); size = 4; }))
                     .unwrap_or_else(|_| { self.working_buffer.extend_from_slice(&val.to_be_bytes()); size = 8; })
             ,
-            DataTagType::Integer(val) => 
+            TagData::Integer(val) => 
                 i8::try_from(val).map(|n| { self.working_buffer.extend_from_slice(&n.to_be_bytes()); size = 1; })
                     .or_else(|_| i16::try_from(val).map(|n| { self.working_buffer.extend_from_slice(&n.to_be_bytes()); size = 2; }))
                     .or_else(|_| i32::try_from(val).map(|n| { self.working_buffer.extend_from_slice(&n.to_be_bytes()); size = 4; }))
                     .unwrap_or_else(|_| { self.working_buffer.extend_from_slice(&val.to_be_bytes()); size = 8; })
             ,
-            DataTagType::Utf8(val) => { 
+            TagData::Utf8(val) => { 
                 let slice = val.as_bytes();
                 self.working_buffer.extend_from_slice(slice);
                 size = slice.len().try_into().unwrap();
             },
-            DataTagType::Binary(val) => { self.working_buffer.extend_from_slice(&val); size = val.len().try_into().unwrap(); },
-            DataTagType::Float(val) => { self.working_buffer.extend_from_slice(&val.to_be_bytes()); size = 8; },
+            TagData::Binary(val) => { self.working_buffer.extend_from_slice(&val); size = val.len().try_into().unwrap(); },
+            TagData::Float(val) => { self.working_buffer.extend_from_slice(&val.to_be_bytes()); size = 8; },
         };
 
-        let tag_id = tag.id;
-        self.finalize_tag(tag_id, size)?;
+        self.finalize_tag(id, size)?;
         Ok(())
     }
 
@@ -115,11 +111,11 @@ impl<W: Write> TagWriter<W> {
         Ok(())
     }
 
-    pub fn write(&mut self, tag: EbmlTag) -> Result<(), TagWriterError> {
+    pub fn write(&mut self, tag: TagPosition) -> Result<(), TagWriterError> {
         match tag {
-            EbmlTag::StartTag(id) => self.start_tag(id),
-            EbmlTag::EndTag(id) => self.end_tag(id)?,
-            EbmlTag::FullTag(tag) => self.write_full_tag(tag)?,
+            TagPosition::StartTag(id) => self.start_tag(id),
+            TagPosition::EndTag(id) => self.end_tag(id)?,
+            TagPosition::FullTag(id, data) => self.write_full_tag(id, data)?,
         }
 
         Ok(())
@@ -133,14 +129,14 @@ mod tests {
     use std::io::Cursor;
 
     use super::super::tools::Vint;
-    use super::super::tags::{EbmlTag, DataTag, DataTagType};
+    use super::super::tags::{TagPosition, TagData};
     use super::TagWriter;
 
     #[test]
     fn write_ebml_tag() {
         let mut dest = Cursor::new(Vec::new());
         let mut writer = TagWriter::new(&mut dest);
-        writer.write(EbmlTag::FullTag(DataTag { id: 0x1a45dfa3, data_type: DataTagType::Master(Vec::new()) })).expect("Error writing tag");
+        writer.write(TagPosition::FullTag(0x1a45dfa3, TagData::Master(Vec::new()))).expect("Error writing tag");
 
         let zero_size = 0u64.as_vint().expect("Error converting [0] to vint")[0];
         assert_eq!(vec![0x1a, 0x45, 0xdf, 0xa3, zero_size], dest.get_ref().to_vec());

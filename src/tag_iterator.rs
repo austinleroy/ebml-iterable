@@ -4,15 +4,15 @@ use std::collections::HashSet;
 use std::hash::Hash;
 
 use super::tools;
-use super::specs::{TagSpec, SpecTagType};
-use super::tags::{EbmlTag, DataTag, DataTagType};
+use super::specs::{EbmlSpecification, TagDataType as SpecificationTagDataType};
+use super::tags::{TagPosition, TagData};
 use super::errors::tag_iterator::TagIteratorError; 
 use super::errors::specs::SpecMismatchError;
 
 struct ProcessingTag<TSpec> 
-    where TSpec: TagSpec
+    where TSpec: EbmlSpecification<TSpec>
 {
-    spec_type: TSpec::SpecType,
+    spec_tag_type: TSpec,
     id: u64,
     size: usize,
     start: usize,
@@ -23,7 +23,7 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 ///
 /// Provides an iterator over EBML files (read from a source implementing the [`std::io::Read`] trait). Can be configured to read specific "Master" tags as complete objects rather than just emitting when they start and end.
 /// 
-/// This is a generic struct that requires a specification implementing [`TagSpec`]. No specifications are included in this crate - you will need to either use another crate providing a spec (such as the Matroska spec implemented in the [webm-iterable](https://crates.io/crates/webm_iterable) or write your own spec if you want to iterate over a custom EBML file. The iterator outputs `SpecTag<TSpec>` objects containing data on the type of tag (defined by the specification) and the tag data. The tag data is stored in an [`EbmlTag`] enum member.  "Master" tags (defined by the specification) usually will be read as `StartTag` and `EndTag` variants, while all other tags will have their complete data within the `FullTag` variant.  The iterator can be configured to buffer Master tags into a `FullTag` variant using the `tags_to_buffer` parameter.
+/// This is a generic struct that requires a specification implementing [`EbmlSpecification`]. No specifications are included in this crate - you will need to either use another crate providing a spec (such as the Matroska spec implemented in the [webm-iterable](https://crates.io/crates/webm_iterable) or write your own spec if you want to iterate over a custom EBML file. The iterator outputs `SpecTag<TSpec>` objects containing data on the type of tag (defined by the specification) and the tag data. The tag data is stored in a [`TagPosition`] enum member.  "Master" tags (defined by the specification) usually will be read as `StartTag` and `EndTag` variants, while all other tags will have their complete data within the `FullTag` variant.  The iterator can be configured to buffer Master tags into a `FullTag` variant using the `tags_to_buffer` parameter.
 /// 
 /// Note: The [`Self::with_capacity()`] method can be used to construct a `TagIterator` with a specified default buffer size.  This is only useful as a microoptimization to memory management if you know the maximum tag size of the file you're reading.
 /// 
@@ -33,21 +33,18 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 /// use std::fs::File;
 /// use ebml_iterable::TagIterator;
 /// #
-/// # use ebml_iterable::specs::{TagSpec, SpecTagType};
+/// # use ebml_iterable::specs::{EbmlSpecification, TagDataType};
 /// # #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 /// # enum FooSpec { Bar }
-/// # #[derive(Default)]
-/// # struct TSpecImpl { }
 /// #
-/// # impl TagSpec for TSpecImpl {
-/// #   type SpecType = FooSpec;
-/// #   fn get_tag(&self, id: u64) -> Self::SpecType { FooSpec::Bar }
-/// #   fn get_tag_type(&self, tag: &Self::SpecType) -> SpecTagType { SpecTagType::UnsignedInt }
+/// # impl EbmlSpecification<FooSpec> for FooSpec {
+/// #   fn get_tag(id: u64) -> Option<(FooSpec, TagDataType)> { Some((FooSpec::Bar, TagDataType::UnsignedInt)) }
+/// #   fn get_tag_id(item: &FooSpec) -> u64 { 0 }
 /// # }
 /// 
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let file = File::open("my_ebml_file.ebml")?;
-/// let mut my_iterator: TagIterator<_, TSpecImpl> = TagIterator::new(file, &[]);
+/// let mut my_iterator: TagIterator<_, FooSpec> = TagIterator::new(file, &[]);
 /// for tag in my_iterator {
 ///   println!("{:?}", tag?.tag);
 /// }
@@ -56,15 +53,12 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 /// ```
 /// 
 
-
 pub struct TagIterator<R: Read, TSpec> 
     where 
-    TSpec: TagSpec + Default,
-    TSpec::SpecType: Eq + Hash
+    TSpec: EbmlSpecification<TSpec> + Eq + Hash + Copy
 {
     source: R,
-    spec: TSpec,
-    tags_to_buffer: HashSet<TSpec::SpecType>,
+    tags_to_buffer: HashSet<TSpec>,
     buffer_all: bool,
 
     buffer: Box<[u8]>,
@@ -77,31 +71,29 @@ pub struct TagIterator<R: Read, TSpec>
 
 impl<R: Read, TSpec> TagIterator<R, TSpec>
     where 
-    TSpec: TagSpec + Default,
-    TSpec::SpecType: Eq + Hash
+    TSpec: EbmlSpecification<TSpec> + Eq + Hash + Copy
 {
 
     /// 
     /// Returns a new `TagIterator<TSpec>` instance.
     ///
-    /// The `source` parameter must implement [`std::io::Read`].  The second argument, `tags_to_buffer`, specifies which "Master" tags should be read as [`EbmlTag::FullTag`]s rather than as [`EbmlTag::StartTag`] and [`EbmlTag::EndTag`]s.  Refer to the documentation on [`TagIterator`] for more explanation of how to use the returned instance.
+    /// The `source` parameter must implement [`std::io::Read`].  The second argument, `tags_to_buffer`, specifies which "Master" tags should be read as [`TagPosition::FullTag`]s rather than as [`TagPosition::StartTag`] and [`TagPosition::EndTag`]s.  Refer to the documentation on [`TagIterator`] for more explanation of how to use the returned instance.
     ///
-    pub fn new(source: R, tags_to_buffer: &[TSpec::SpecType]) -> Self {
+    pub fn new(source: R, tags_to_buffer: &[TSpec]) -> Self {
         TagIterator::with_capacity(source, tags_to_buffer, DEFAULT_BUFFER_LEN)
     }
     
     ///
     /// Returns a new `TagIterator<TSpec>` instance with the specified internal buffer capacity.
     ///
-    /// This initializes the `TagIterator` with a specific byte capacity.  The iterator will still reallocate if necessary. (Reallocation occurs if the iterator comes across a tag that should be output as a [`EbmlTag::FullTag`] and its size in bytes is greater than the iterator's current buffer capacity.)
+    /// This initializes the `TagIterator` with a specific byte capacity.  The iterator will still reallocate if necessary. (Reallocation occurs if the iterator comes across a tag that should be output as a [`TagPosition::FullTag`] and its size in bytes is greater than the iterator's current buffer capacity.)
     ///
-    pub fn with_capacity(source: R, tags_to_buffer: &[TSpec::SpecType], capacity: usize) -> Self {
+    pub fn with_capacity(source: R, tags_to_buffer: &[TSpec], capacity: usize) -> Self {
         let buffer = vec![0;capacity];
 
         TagIterator {
             source,
-            spec: TSpec::default(),
-            tags_to_buffer: tags_to_buffer.iter().cloned().collect(),
+            tags_to_buffer: tags_to_buffer.iter().copied().collect(),
             buffer_all: false,
             buffer: buffer.into_boxed_slice(),
             buffered_byte_length: 0,
@@ -183,52 +175,63 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         let tag_id = self.read_tag_id()?;
         let size: usize = self.read_tag_size()?;
 
-        let spec_type = self.spec.get_tag(tag_id);
-        let spec_tag_type = self.spec.get_tag_type(&spec_type);
+        let spec_tag = <TSpec>::get_tag(tag_id);
 
-        let is_master = matches!(spec_tag_type, SpecTagType::Master);
-        if is_master && !self.buffer_all && !self.tags_to_buffer.contains(&spec_type) {
+        if spec_tag.is_none() {
+            return Ok(SpecTag { 
+                spec_tag: None, 
+                tag: TagPosition::FullTag(tag_id, TagData::Binary(self.read_tag_data(size)?.to_vec()))
+            });
+        }
+
+        let spec_tag = spec_tag.unwrap();
+
+        let is_master = matches!(spec_tag.1, SpecificationTagDataType::Master);
+        if is_master && !self.buffer_all && !self.tags_to_buffer.contains(&spec_tag.0) {
             self.tag_stack.push(ProcessingTag {
-                spec_type,
+                spec_tag_type: spec_tag.0,
                 id: tag_id,
                 size,
                 start: self.current_offset(),
             });
 
-            Ok(SpecTag { spec_type, tag: EbmlTag::StartTag(tag_id) })
+            Ok(SpecTag { spec_tag: Some(spec_tag.0), tag: TagPosition::StartTag(tag_id) })
         } else {
-            let data = self.read_tag_data(size)?;
-            let data_tag_type = match spec_tag_type {
-                SpecTagType::Master => {
-                    let mut src = Cursor::new(data);
+            let raw_data = self.read_tag_data(size)?;
+            let tag_data = match spec_tag.1 {
+                SpecificationTagDataType::Master => {
+                    let mut src = Cursor::new(raw_data);
                     let mut sub_iterator: TagIterator<_, TSpec> = TagIterator::new(&mut src, &[]);
                     sub_iterator.buffer_all = true;
 
-                    let children: Result<Vec<DataTag>, TagIteratorError> = sub_iterator.map(|c| {
+                    let children: Result<Vec<(u64, TagData)>, TagIteratorError> = sub_iterator.map(|c| {
                         match c?.tag {
-                            EbmlTag::FullTag(data) => Ok(data),
+                            TagPosition::FullTag(id, data) => Ok((id, data)),
                             _ => panic!("Everything should be buffered here"),
                         }
                     }).collect();
 
-                    DataTagType::Master(children?)
+                    TagData::Master(children?)
                 },
-                SpecTagType::UnsignedInt => DataTagType::UnsignedInt(tools::arr_to_u64(data)
+                SpecificationTagDataType::UnsignedInt => TagData::UnsignedInt(tools::arr_to_u64(raw_data)
                     .map_err(|e| TagIteratorError::SpecMismatch { tag_id, problem: SpecMismatchError::UintParseError(e.to_string()) })
                 ?),
-                SpecTagType::Integer => DataTagType::Integer(tools::arr_to_i64(data)
+                SpecificationTagDataType::Integer => TagData::Integer(tools::arr_to_i64(raw_data)
                     .map_err(|e| TagIteratorError::SpecMismatch { tag_id, problem: SpecMismatchError::IntParseError(e.to_string()) })
                 ?),
-                SpecTagType::Utf8 => DataTagType::Utf8(String::from_utf8(data.to_vec())
+                SpecificationTagDataType::Utf8 => TagData::Utf8(String::from_utf8(raw_data.to_vec())
                     .map_err(|e| TagIteratorError::SpecMismatch { tag_id, problem: SpecMismatchError::Utf8ParseError { source: e } })
                 ?),
-                SpecTagType::Binary => DataTagType::Binary(data.to_vec()),
-                SpecTagType::Float => DataTagType::Float(tools::arr_to_f64(data)
+                SpecificationTagDataType::Binary => TagData::Binary(raw_data.to_vec()),
+                SpecificationTagDataType::Float => TagData::Float(tools::arr_to_f64(raw_data)
                     .map_err(|e| TagIteratorError::SpecMismatch { tag_id, problem: SpecMismatchError::FloatParseError(e.to_string()) })
                 ?),
             };
 
-            Ok(SpecTag { spec_type, tag: EbmlTag::FullTag(DataTag { id: tag_id, data_type: data_tag_type }) })
+            Ok(SpecTag { 
+                spec_tag: Some(spec_tag.0), 
+                tag: TagPosition::FullTag(tag_id, tag_data)
+            })
         }
     }
 }
@@ -236,19 +239,17 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 ///
 /// A struct holding EBML tag data.  Emitted by [`TagIterator`].
 ///
-/// This struct houses the `SpecType` and tag data for items emitted by the `TagIterator`. The `spec_type` is simply an enum value representing the tag type (this is pulled from `TSpec` based on the tag id present in the data being read) and may be ignored if you prefer to work directly with the u64 tag ids. The `tag` contains the actual data enclosed in the tag along with the tag id.
+/// This struct houses the specification tag type and tag data for items emitted by the `TagIterator`. The `spec_tag` is defined by the specification and represents the tag type (pulled from `TSpec` based on the tag id present in the data being read) and may be ignored if you prefer to work directly with the u64 tag ids.  Note that the `spec_tag` can be `None` if the id was not found in the defined specification. The `tag` contains the actual data enclosed in the tag along with the tag id.
 /// 
 pub struct SpecTag<TSpec> 
-    where TSpec: TagSpec + Default,
-    TSpec::SpecType: Eq + Hash
+    where TSpec: EbmlSpecification<TSpec> + Eq + Hash + Copy
 {
-    pub spec_type: TSpec::SpecType,
-    pub tag: EbmlTag
+    pub spec_tag: Option<TSpec>,
+    pub tag: TagPosition
 }
 
 impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
-    where TSpec: TagSpec + Default,
-    TSpec::SpecType: Eq + Hash
+    where TSpec: EbmlSpecification<TSpec> + Eq + Hash + Copy
 {
     type Item = Result<SpecTag<TSpec>, TagIteratorError>;
 
@@ -256,7 +257,7 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
         if let Some(tag) = self.tag_stack.last() {
             if self.current_offset() >= tag.start + tag.size {
                 let tag = self.tag_stack.pop().unwrap();
-                return Some(Ok(SpecTag { spec_type: tag.spec_type, tag: EbmlTag::EndTag(tag.id) }));
+                return Some(Ok(SpecTag { spec_tag: Some(tag.spec_tag_type), tag: TagPosition::EndTag(tag.id) }));
             }
         }
 
