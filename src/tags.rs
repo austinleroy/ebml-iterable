@@ -1,3 +1,9 @@
+//!
+//! Contains types that hold tag data.
+//! 
+//! These types are used by both the [`TagIterator`][`super::TagIterator`] and [`TagWriter`][`super::TagWriter`].
+//! 
+
 ///
 /// `TagPosition` is an enumeration containing three different tag "positions" that this library works with:
 ///

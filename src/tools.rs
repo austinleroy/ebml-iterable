@@ -6,50 +6,69 @@ use std::convert::TryInto;
 
 use super::errors::tool::ToolError;
 
-pub trait Vint {
-    fn as_vint(&self) -> Result<Vec<u8>, ToolError>;
-    fn as_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError>;
+///
+/// Trait to enable easy serialization to a vint.
+/// 
+/// This is only available for types that can be cast as `u64`.
+/// 
+pub trait Vint: Into<u64> + Copy {
+    ///
+    /// Returns a representation of the current value as a vint array.
+    /// 
+    /// This can return an error if the value is too large to be representable as a vint.
+    /// 
+    fn as_vint(&self) -> Result<Vec<u8>, ToolError> {
+        let val: u64 = (*self).into();
+        check_size_u64(val)?;
+        let mut length = 1;
+        while length <= 8 {
+            if val < (1 << ((7 * length) - 1)) {
+                break;
+            }
+            length += 1;
+        }
+
+        Ok(as_vint_no_check_u64(val, length))
+    }
+
+    ///
+    /// Returns a representation of the current value as a vint array with a specified length.
+    /// 
+    /// This can return an error if the value is too large to be representable as a vint.
+    /// 
+    fn as_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError> {
+        let val: u64 = (*self).into();
+        check_size_u64(val)?;
+        Ok(as_vint_no_check_u64(val, length))
+    }
 }
 
-fn check_size_u64(val: &u64) -> Result<(), ToolError> {
-    if *val > (1 << 56) - 2 {
-        Err(ToolError::WriteVintOverflow(*val))
+impl Vint for u64 { }
+impl Vint for u32 { }
+impl Vint for u16 { }
+impl Vint for u8 { }
+
+fn check_size_u64(val: u64) -> Result<(), ToolError> {
+    if val > (1 << 56) - 2 {
+        Err(ToolError::WriteVintOverflow(val))
     } else {
         Ok(())
     }
 }
 
-fn as_vint_no_check_u64(val: &u64, length: usize) -> Vec<u8> {
+fn as_vint_no_check_u64(val: u64, length: usize) -> Vec<u8> {
     let bytes: [u8; 8] = val.to_be_bytes();
     let mut result: Vec<u8> = Vec::from(&bytes[(8-length)..]);
     result[0] |= 1 << (8 - length);
     result
 }
 
-impl Vint for u64 {
-    fn as_vint(&self) -> Result<Vec<u8>, ToolError> { 
-        check_size_u64(&self)?;
-        let mut length = 1;
-        while length <= 8 {
-            if *self < (1 << ((7 * length) - 1)) {
-                break;
-            }
-            length += 1;
-        }
-
-        Ok(as_vint_no_check_u64(&self, length))
-    }
-
-    fn as_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError> {
-        check_size_u64(&self)?;
-        Ok(as_vint_no_check_u64(&self, length))
-    }
-}
-
 /// 
 /// Reads a vint from the beginning of the input array slice.
 /// 
 /// This method returns an option with the `None` variant used to indicate there was not enough data in the buffer to completely read a vint.  This method can return a `ToolError` if the input array cannot be read as a vint.
+/// 
+/// The returned tuple contains the value of the vint (`u64`) and the length of the vint (`usize`).  The length will be less than or equal to the length of the input slice.
 /// 
 pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
     if buffer.is_empty() {

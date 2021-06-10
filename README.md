@@ -8,7 +8,7 @@ binary version of XML. It's used for container formats like [WebM][webm] or
 
 ```Cargo.toml
 [dependencies]
-ebml-iterable = "0.1.0"
+ebml-iterable = "0.2.0"
 ```
 
 # Usage
@@ -54,7 +54,14 @@ TagData is an enum containing data stored within a tag.  It is important to note
 
 # Specification Implementation
 
-Any specification based on EBML can use this library to parse or write binary data.  Writing needs nothing special, but parsing requires a struct implementing the `EbmlSpecification` trait.  This trait currently requires implementation of two methods - `get_tag` and `get_tag_id`.  These are used to convert between specific tag instances and ids.  Custom specification implementations can refer to [webm-iterable][webm-iterable] as an example.
+Any specification based on EBML can use this library to parse or write binary data.  Writing needs nothing special, but parsing requires a struct implementing the `EbmlSpecification` trait.  This trait currently requires implementation of two methods - `get_tag` and `get_tag_id`.  These are used to convert between specific tag instances and ids.  Implementation can be simplified by enabling the `"derive-spec"` feature flag and using the provided macro.  Custom specification implementations can refer to [webm-iterable][webm-iterable] as an example.
+
+# Features
+ 
+There is currently only one optional feature in this crate, but that may change over time as needs arise.
+ 
+* **derive-spec** -
+    When enabled, this provides a macro to simplify implementations of the `EbmlSpecification` trait.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
 
 
 # State of this project

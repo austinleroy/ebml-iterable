@@ -1,3 +1,10 @@
+///
+/// Different data types defined in the EBML specification.
+/// 
+/// Note: This library made a concious decision to not work with "Date" elements from EBML due to lack of built-in support for dates in Rust. Specification implementations should treat Date elements as Binary so that consumers have the option of parsing the unaltered data using their library of choice, if needed.
+/// 
+
+// Possible future feature flag to enable Date functionality by having `chrono` as an optional dependency?
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum TagDataType {
     Master,
@@ -11,7 +18,7 @@ pub enum TagDataType {
 ///
 /// This trait should be implemented to define a specification so that EBML can be parsed correctly.  Typically implemented on an Enum of tag variants.
 /// 
-/// Any specification using EBML can take advantage of this library to parse or write binary data.  As stated in the docs, [TagWriter][`super::TagWriter`] needs nothing special, but [TagIterator][`super::TagIterator`] requires a struct implementing this trait.  Custom specification implementations can refer to [webm-iterable](https://crates.io/crates/webm_iterable) as an example.
+/// Any specification using EBML can take advantage of this library to parse or write binary data.  As stated in the docs, [TagWriter](https://docs.rs/ebml-iterable/latest/ebml_iterable/struct.TagWriter.html) needs nothing special, but [TagIterator](https://docs.rs/ebml-iterable/latest/ebml_iterable/struct.TagIterator.html) requires a struct implementing this trait.  Custom specification implementations can refer to [webm-iterable](https://crates.io/crates/webm_iterable) as an example.
 ///
 
 pub trait EbmlSpecification<T: EbmlSpecification<T>> {
