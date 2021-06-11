@@ -1,7 +1,9 @@
-use syn::{Data, DeriveInput, Error, Generics, Ident, Result, LitInt};
+use syn::{Data, ItemEnum, Error, Generics, Ident, Result, LitInt};
+
+use ebml_iterable_specification::TagDataType;
 
 pub struct Enum<'a> {
-    pub original: &'a DeriveInput,
+    pub original: &'a ItemEnum,
     pub ident: Ident,
     pub variants: Vec<Variant<'a>>,
     pub generics: &'a Generics,
@@ -16,16 +18,12 @@ pub struct Variant<'a> {
 pub struct Attributes {
     pub id: u64,
     pub data_type: syn::Path,
+    pub data_type_val: TagDataType,
 }
 
 impl<'a> Enum<'a> {
-    pub fn from_syn(node: &'a DeriveInput) -> Result<Self> {
-        let data = match &node.data {
-            Data::Enum(data) => data,
-            _ => { return Err(Error::new_spanned(node, "#[derive(EbmlSpecification)] only works on Enums")) }
-        };
-
-        let variants = data
+    pub fn from_syn(node: &'a ItemEnum) -> Result<Self> {
+        let variants = node
             .variants
             .iter()
             .map(|node| Variant::from_syn(node))
@@ -60,20 +58,42 @@ impl<'a> Variant<'a> {
         }
 
         if id.is_none() {
-            return Err(Error::new_spanned(node, "#[id] attribute is required when deriving EbmlSpecification"));
+            return Err(Error::new_spanned(node, "#[id] attribute is required when using #[ebml_specification] attribute"));
         }
         let id = id.unwrap();
 
         if data_type.is_none() {
-            return Err(Error::new_spanned(node, "#[data_type] attribute is required when deriving EbmlSpecification"));
+            return Err(Error::new_spanned(node, "#[data_type] attribute is required when using #[ebml_specification] attribute"));
         }
         let data_type = data_type.unwrap();
+
+        let data_type_name = data_type.segments.iter().last();
+        if data_type_name.is_none() {
+            return Err(Error::new_spanned(node, "#[data_type] attribute value could not be resolved, expected `TagDataType` variant"));
+        }
+        let data_type_name = data_type_name.unwrap().ident.to_string();
+        let data_type_val = if data_type_name == "UnsignedInt" {
+            TagDataType::UnsignedInt
+        } else if data_type_name == "Integer" {
+            TagDataType::Integer
+        } else if data_type_name == "Utf8" {
+            TagDataType::Utf8
+        } else if data_type_name == "Binary" {
+            TagDataType::Binary
+        } else if data_type_name == "Float" {
+            TagDataType::Float
+        } else if data_type_name == "Master" {
+            TagDataType::Master
+        } else {
+            return Err(Error::new_spanned(node, format!("unrecognized #[data_type] value: {}", data_type_name)));
+        };
 
         Ok(Variant {
             original: node,
             attributes: Attributes {
                 id,
                 data_type,
+                data_type_val
             },
             ident: node.ident.clone(),
         })

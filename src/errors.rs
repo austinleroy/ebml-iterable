@@ -78,6 +78,10 @@ pub mod tag_iterator {
             tag_id: u64,
             problem: SpecMismatchError,
         },
+        UnknownTag {
+            id: u64,
+            data: Vec<u8>,
+        },
         ReadError {
             source: io::Error,
         },
@@ -92,6 +96,7 @@ pub mod tag_iterator {
                     problem,
                 } => write!(f, "Source data does not seem to match tag specification for tag id ({}). {}", tag_id, problem),
                 TagIteratorError::ReadError { source: _ } => write!(f, "Error reading from source."),
+                TagIteratorError::UnknownTag { id, data: _ } => write!(f, "Unknown tag id: {}", id),
             }
         }
     }
@@ -100,6 +105,7 @@ pub mod tag_iterator {
         fn source(&self) -> Option<&(dyn Error + 'static)> {
             match self {
                 TagIteratorError::CorruptedData(_) => None,
+                TagIteratorError::UnknownTag{ id: _, data: _ } => None,
                 TagIteratorError::SpecMismatch { tag_id: _, problem } => problem.source(),
                 TagIteratorError::ReadError { source } => Some(source),
             }
