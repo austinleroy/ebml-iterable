@@ -5,16 +5,16 @@
 //! [MKV][mkv].
 //! 
 //! # Important - Specifications
-//! The iterator contained in this crate is spec-agnostic and requires a specification implementing the [`specs::EbmlSpecification`] trait to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
+//! The iterator contained in this crate is spec-agnostic and requires a specification implementing the [`specs::EbmlSpecification`] and [`specs::EbmlTag`] traits to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
 //! 
-//! Implementing custom specifications can be made less painful by enabling the `"derive-spec"` feature flag in this crate and using the `EbmlSpecification` macro.
+//! Implementing custom specifications can be made less painful by enabling the `"derive-spec"` feature flag in this crate and using the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) macro.
 //! 
 //! # Features
 //! 
 //! There is currently only one optional feature in this crate, but that may change over time as needs arise.
 //! 
 //! * **derive-spec** -
-//!     When enabled, this provides a macro to simplify implementations of the [`EbmlSpecification`][`specs::EbmlSpecification`] trait.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
+//!     When enabled, this provides the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) attribute macro to simplify implementation of the [`EbmlSpecification`][`specs::EbmlSpecification`] and [`EbmlTag`][`specs::EbmlTag`] traits.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
 //! 
 //! # Known Limitations
 //! This library was not built to work with an "Unknown Data Size" as defined in [RFC8794][rfc8794]. As such, it likely will not support streaming applications and will only work on complete datasets.
@@ -31,7 +31,15 @@ mod tag_iterator;
 mod tag_writer;
 pub mod tools;
 pub mod specs;
-pub mod tags;
 
 pub use self::tag_iterator::TagIterator;
 pub use self::tag_writer::TagWriter;
+
+pub mod error {
+
+    //! 
+    //! Potential errors that can occur when reading or writing EBML data.
+    //!
+    pub use super::errors::tag_iterator::TagIteratorError;
+    pub use super::errors::tag_writer::TagWriterError;
+}

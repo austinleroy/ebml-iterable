@@ -1,4 +1,5 @@
-use syn::{Data, ItemEnum, Error, Generics, Ident, Result, LitInt};
+use proc_macro2::TokenStream;
+use syn::{ItemEnum, Error, Generics, Ident, Result, LitInt, Path};
 
 use ebml_iterable_specification::TagDataType;
 
@@ -11,14 +12,14 @@ pub struct Enum<'a> {
 
 pub struct Variant<'a> {
     pub original: &'a syn::Variant,
-    pub attributes: Attributes,
     pub ident: Ident,
+    pub id_attr: (u64, Attribute<'a>),
+    pub data_type_attr: (TagDataType, Path, Attribute<'a>),
 }
 
-pub struct Attributes {
-    pub id: u64,
-    pub data_type: syn::Path,
-    pub data_type_val: TagDataType,
+pub struct Attribute<'a> {
+    pub original: &'a syn::Attribute,
+    pub tokens: &'a TokenStream,
 }
 
 impl<'a> Enum<'a> {
@@ -40,62 +41,67 @@ impl<'a> Enum<'a> {
 
 impl<'a> Variant<'a> {
     fn from_syn(node: &'a syn::Variant) -> Result<Self> {
-        let mut id: Option<u64> = None;
-        let mut data_type: Option<syn::Path> = None;
+        let mut id_attr: Option<(u64, Attribute<'a>)> = None;
+        let mut data_type_attr: Option<(TagDataType, Path, Attribute<'a>)> = None;
     
         for attr in &node.attrs {
             if attr.path.is_ident("id") {
-                if id.is_some() {
+                if id_attr.is_some() {
                     return Err(Error::new_spanned(node, "duplicate #[id] attribute"));
                 }
-                id = Some(attr.parse_args::<LitInt>()?.base10_parse::<u64>()?);
+                let val = attr.parse_args::<LitInt>()?.base10_parse::<u64>()?;
+                id_attr = Some((val, Attribute {
+                    original: &attr,
+                    tokens: &attr.tokens,
+                }));
             } else if attr.path.is_ident("data_type") {
-                if data_type.is_some() {
+                if data_type_attr.is_some() {
                     return Err(Error::new_spanned(node, "duplicate #[data_type] attribute"));
                 }
-                data_type = Some(attr.parse_args::<syn::Path>()?);
+
+                let val = attr.parse_args::<syn::Path>().map_err(|err| Error::new(err.span(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
+                let data_type_name = val.segments.iter().last();
+                if data_type_name.is_none() {
+                    return Err(Error::new_spanned(val, "#[data_type()] requires `ebml_iterable::TagDataType`"));
+                }
+                let data_type_name = data_type_name.unwrap().ident.to_string();
+                let data_type_val = if data_type_name == "UnsignedInt" {
+                    TagDataType::UnsignedInt
+                } else if data_type_name == "Integer" {
+                    TagDataType::Integer
+                } else if data_type_name == "Utf8" {
+                    TagDataType::Utf8
+                } else if data_type_name == "Binary" {
+                    TagDataType::Binary
+                } else if data_type_name == "Float" {
+                    TagDataType::Float
+                } else if data_type_name == "Master" {
+                    TagDataType::Master
+                } else {
+                    return Err(Error::new_spanned(val, format!("unrecognized `ebml_iterable::TagDataType` value: {}", data_type_name)));
+                };
+                data_type_attr = Some((data_type_val, val, Attribute {
+                    original: &attr,
+                    tokens: &attr.tokens,
+                }));
             } 
         }
 
-        if id.is_none() {
+        if id_attr.is_none() {
             return Err(Error::new_spanned(node, "#[id] attribute is required when using #[ebml_specification] attribute"));
         }
-        let id = id.unwrap();
+        let id_attr = id_attr.unwrap();
 
-        if data_type.is_none() {
+        if data_type_attr.is_none() {
             return Err(Error::new_spanned(node, "#[data_type] attribute is required when using #[ebml_specification] attribute"));
         }
-        let data_type = data_type.unwrap();
-
-        let data_type_name = data_type.segments.iter().last();
-        if data_type_name.is_none() {
-            return Err(Error::new_spanned(node, "#[data_type] attribute value could not be resolved, expected `TagDataType` variant"));
-        }
-        let data_type_name = data_type_name.unwrap().ident.to_string();
-        let data_type_val = if data_type_name == "UnsignedInt" {
-            TagDataType::UnsignedInt
-        } else if data_type_name == "Integer" {
-            TagDataType::Integer
-        } else if data_type_name == "Utf8" {
-            TagDataType::Utf8
-        } else if data_type_name == "Binary" {
-            TagDataType::Binary
-        } else if data_type_name == "Float" {
-            TagDataType::Float
-        } else if data_type_name == "Master" {
-            TagDataType::Master
-        } else {
-            return Err(Error::new_spanned(node, format!("unrecognized #[data_type] value: {}", data_type_name)));
-        };
+        let data_type_attr = data_type_attr.unwrap();
 
         Ok(Variant {
             original: node,
-            attributes: Attributes {
-                id,
-                data_type,
-                data_type_val
-            },
             ident: node.ident.clone(),
+            id_attr,
+            data_type_attr,
         })
     }
 }

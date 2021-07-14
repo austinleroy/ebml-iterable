@@ -5,6 +5,8 @@ pub mod tool {
     use super::fmt;
     use super::Error;
 
+    use std::string::FromUtf8Error;
+
     #[derive(Debug)]
     pub enum ToolError {
         ReadVintOverflow,
@@ -12,6 +14,7 @@ pub mod tool {
         ReadU64Overflow(Vec<u8>),
         ReadI64Overflow(Vec<u8>),
         ReadF64Mismatch(Vec<u8>),
+        FromUtf8Error(Vec<u8>, FromUtf8Error)
     }
 
     impl fmt::Display for ToolError {
@@ -22,43 +25,15 @@ pub mod tool {
                 ToolError::ReadU64Overflow(arr) => write!(f, "Could not read unsigned int from array: {:?}", arr),
                 ToolError::ReadI64Overflow(arr) => write!(f, "Could not read int from array: {:?}", arr),
                 ToolError::ReadF64Mismatch(arr) => write!(f, "Could not read float from array: {:?}", arr),
+                ToolError::FromUtf8Error(arr, _source) => write!(f, "Could not read utf8 data: {:?}", arr),
             }
         }
     }
 
-    impl Error for ToolError {}
-}
-
-pub mod specs {
-    use super::fmt;
-    use super::Error;
-    use std::string;
-
-    #[derive(Debug)]
-    pub enum SpecMismatchError {
-        UintParseError(String),
-        IntParseError(String),
-        Utf8ParseError {
-            source: string::FromUtf8Error,
-        },
-        FloatParseError(String),
-    }
-
-    impl fmt::Display for SpecMismatchError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            match self {
-                SpecMismatchError::UintParseError(err) => write!(f, "Error parsing data as Unsigned Int: {}", err),
-                SpecMismatchError::IntParseError(err) => write!(f, "Error parsing data as Integer: {}", err),
-                SpecMismatchError::Utf8ParseError { source: _ } => write!(f, "Error parsing data as Utf8.  See `source()` for details."),
-                SpecMismatchError::FloatParseError(err) => write!(f, "Error parsing data as Float: {}", err),
-            }
-        }
-    }
-
-    impl Error for SpecMismatchError {
+    impl Error for ToolError {
         fn source(&self) -> Option<&(dyn Error + 'static)> {
             match self {
-                SpecMismatchError::Utf8ParseError { source } => Some(source),
+                ToolError::FromUtf8Error(_arr, source) => Some(source),
                 _ => None,
             }
         }
@@ -68,21 +43,48 @@ pub mod specs {
 pub mod tag_iterator {
     use super::fmt;
     use super::Error;
-    use super::specs::SpecMismatchError;
+    use super::tool::ToolError;
     use std::io;
 
+    ///
+    /// Errors that can occur when reading ebml data.
+    ///
     #[derive(Debug)]
     pub enum TagIteratorError {
-        CorruptedData(String),
-        SpecMismatch {
+
+        ///
+        /// An error indicating that the file being read is not valid ebml.
+        ///
+        /// This error typically occurs if the file ends unexpectedly or has an unreadable tag id.
+        ///
+        CorruptedFileData(String),
+
+        ///
+        /// An error indicating that tag data appears to be corrupted.
+        ///
+        /// This error typically occurs if tag data cannot be read as its expected data type (e.g. trying to read `[32,42,8]` as float data, since floats require either 4 or 8 bytes).
+        ///
+        CorruptedTagData {
+
+            ///
+            /// The id of the corrupted tag.
+            ///
             tag_id: u64,
-            problem: SpecMismatchError,
+
+            ///
+            /// An error describing why the data is corrupted.
+            ///
+            problem: ToolError,
         },
-        UnknownTag {
-            id: u64,
-            data: Vec<u8>,
-        },
+
+        ///
+        /// An error that wraps an IO error when reading from the underlying source.
+        ///
         ReadError {
+
+            ///
+            /// The [`io::Error`] that caused this problem.
+            ///
             source: io::Error,
         },
     }
@@ -90,13 +92,12 @@ pub mod tag_iterator {
     impl fmt::Display for TagIteratorError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                TagIteratorError::CorruptedData(message) => write!(f, "Encountered corrupted data.  Message: {}", message),
-                TagIteratorError::SpecMismatch {
+                TagIteratorError::CorruptedFileData(message) => write!(f, "Encountered corrupted data.  Message: {}", message),
+                TagIteratorError::CorruptedTagData {
                     tag_id,
                     problem,
-                } => write!(f, "Source data does not seem to match tag specification for tag id ({}). {}", tag_id, problem),
+                } => write!(f, "Error reading data for tag id ({}). {}", tag_id, problem),
                 TagIteratorError::ReadError { source: _ } => write!(f, "Error reading from source."),
-                TagIteratorError::UnknownTag { id, data: _ } => write!(f, "Unknown tag id: {}", id),
             }
         }
     }
@@ -104,9 +105,8 @@ pub mod tag_iterator {
     impl Error for TagIteratorError {
         fn source(&self) -> Option<&(dyn Error + 'static)> {
             match self {
-                TagIteratorError::CorruptedData(_) => None,
-                TagIteratorError::UnknownTag{ id: _, data: _ } => None,
-                TagIteratorError::SpecMismatch { tag_id: _, problem } => problem.source(),
+                TagIteratorError::CorruptedFileData(_) => None,
+                TagIteratorError::CorruptedTagData { tag_id: _, problem } => problem.source(),
                 TagIteratorError::ReadError { source } => Some(source),
             }
         }
@@ -118,13 +118,40 @@ pub mod tag_writer {
     use super::Error;
     use std::io;
 
+    ///
+    /// Errors that can occur when writing ebml data.
+    ///
     #[derive(Debug)]
     pub enum TagWriterError {
+
+        ///
+        /// An error with the size of a tag.
+        ///
+        /// Can occur if the tag size overflows the max value representable by a vint (`2^57 - 1`, or `144,115,188,075,855,871`).  Typically this won't happen - this variant is included for completeness.
+        ///
         TagSizeError(String),
+
+        ///
+        /// An error indicating a tag was closed unexpectedly.
+        ///
+        /// Can occur if a [`Master::End`][`crate::specs::Master::End`] variant is passed to the [`TagWriter`][`crate::TagWriter`] but the id doesn't match the currently open tag.
+        ///
         UnexpectedClosingTag {
+
+            ///
+            /// The id of the tag being closed.
+            ///
             tag_id: u64,
+
+            ///
+            /// The id of the currently open tag.
+            ///
             expected_id: Option<u64>,
         },
+
+        ///
+        /// An error that wraps an IO error when writing to the underlying destination.
+        ///
         WriteError {
             source: io::Error,
         },

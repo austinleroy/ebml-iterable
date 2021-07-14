@@ -15,6 +15,8 @@ pub trait Vint: Into<u64> + Copy {
     ///
     /// Returns a representation of the current value as a vint array.
     /// 
+    /// # Errors
+    ///
     /// This can return an error if the value is too large to be representable as a vint.
     /// 
     fn as_vint(&self) -> Result<Vec<u8>, ToolError> {
@@ -34,6 +36,8 @@ pub trait Vint: Into<u64> + Copy {
     ///
     /// Returns a representation of the current value as a vint array with a specified length.
     /// 
+    /// # Errors
+    ///
     /// This can return an error if the value is too large to be representable as a vint.
     /// 
     fn as_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError> {
@@ -49,7 +53,7 @@ impl Vint for u16 { }
 impl Vint for u8 { }
 
 fn check_size_u64(val: u64) -> Result<(), ToolError> {
-    if val > (1 << 56) - 2 {
+    if val > (1 << 49) - 2 {
         Err(ToolError::WriteVintOverflow(val))
     } else {
         Ok(())
@@ -66,9 +70,13 @@ fn as_vint_no_check_u64(val: u64, length: usize) -> Vec<u8> {
 /// 
 /// Reads a vint from the beginning of the input array slice.
 /// 
-/// This method returns an option with the `None` variant used to indicate there was not enough data in the buffer to completely read a vint.  This method can return a `ToolError` if the input array cannot be read as a vint.
+/// This method returns an option with the `None` variant used to indicate there was not enough data in the buffer to completely read a vint.
 /// 
 /// The returned tuple contains the value of the vint (`u64`) and the length of the vint (`usize`).  The length will be less than or equal to the length of the input slice.
+/// 
+/// # Errors
+///
+/// This method can return a `ToolError` if the input array cannot be read as a vint.
 /// 
 pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
     if buffer.is_empty() {
@@ -99,7 +107,11 @@ pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
 ///
 /// Reads a `u64` value from any length array slice.
 /// 
-/// Rather than forcing the input to be a `[u8; 8]` like standard library methods, this can interpret a `u64` from a slice of any length < 8.  Bytes are assumed to be least significant when reading the value - i.e. an array of `[4, 0]` would return a value of `1024`.  Will return an error if the input slice has a length > 8.
+/// Rather than forcing the input to be a `[u8; 8]` like standard library methods, this can interpret a `u64` from a slice of any length < 8.  Bytes are assumed to be least significant when reading the value - i.e. an array of `[4, 0]` would return a value of `1024`.  
+///
+/// # Errors
+///
+/// This method will return an error if the input slice has a length > 8.
 /// 
 /// ## Example
 /// 
@@ -128,7 +140,11 @@ pub fn arr_to_u64(arr: &[u8]) -> Result<u64, ToolError> {
 ///
 /// Reads an `i64` value from any length array slice.
 /// 
-/// Rather than forcing the input to be a `[u8; 8]` like standard library methods, this can interpret an `i64` from a slice of any length < 8.  Bytes are assumed to be least significant when reading the value - i.e. an array of `[4, 0]` would return a value of `1024`.  Will return an error if the input slice has a length > 8.
+/// Rather than forcing the input to be a `[u8; 8]` like standard library methods, this can interpret an `i64` from a slice of any length < 8.  Bytes are assumed to be least significant when reading the value - i.e. an array of `[4, 0]` would return a value of `1024`.  
+///
+/// # Errors
+///
+/// This method will return an error if the input slice has a length > 8.
 /// 
 /// ## Example
 /// 
@@ -148,25 +164,29 @@ pub fn arr_to_i64(arr: &[u8]) -> Result<i64, ToolError> {
 
     if arr[0] > 127 {
         if arr.len() == 8 {
-            Ok(i64::from_be_bytes(arr.try_into().unwrap()))
+            Ok(i64::from_be_bytes(arr.try_into().expect("[u8;8] should be convertible to i64")))
         } else {
-            Ok(-((1 << (arr.len() * 8)) - (arr_to_u64(arr).unwrap() as i64)))
+            Ok(-((1 << (arr.len() * 8)) - (arr_to_u64(arr).expect("arr_to_u64 shouldn't error if length is <= 8") as i64)))
         }
     } else {
-        Ok(arr_to_u64(arr).unwrap() as i64)
+        Ok(arr_to_u64(arr).expect("arr_to_u64 shouldn't error if length is <= 8") as i64)
     }
 }
 
 ///
 /// Reads an `f64` value from an array slice of length 4 or 8.
 /// 
-/// This method wraps `f32` and `f64` conversions from big endian byte arrays and casts the result as an `f64`.  Will throw an error if the input slice length is not 4 or 8.
+/// This method wraps `f32` and `f64` conversions from big endian byte arrays and casts the result as an `f64`.  
+///
+/// # Errors
+///
+/// This method will throw an error if the input slice length is not 4 or 8.
 /// 
 pub fn arr_to_f64(arr: &[u8]) -> Result<f64, ToolError> {
     if arr.len() == 4 {
-        Ok(f32::from_be_bytes(arr.try_into().unwrap()) as f64)
+        Ok(f32::from_be_bytes(arr.try_into().expect("arr should be [u8;4]")) as f64)
     } else if arr.len() == 8 {
-        Ok(f64::from_be_bytes(arr.try_into().unwrap()))
+        Ok(f64::from_be_bytes(arr.try_into().expect("arr should be [u8;8]")))
     } else {
         Err(ToolError::ReadF64Mismatch(Vec::from(arr)))
     }

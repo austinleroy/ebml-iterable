@@ -1,6 +1,6 @@
 [package]
 name = "ebml-iterable-specification"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Austin Blake <austinl3roy@gmail.com>"]
 edition = "2018"
 description = "Provides the base `EbmlSpecification` used by the `ebml-iterable` and `ebml-iterable-specification-derive` crates."

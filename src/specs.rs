@@ -8,5 +8,6 @@
 pub use ebml_iterable_specification_derive::ebml_specification;
 
 pub use ebml_iterable_specification::EbmlSpecification as EbmlSpecification;
+pub use ebml_iterable_specification::EbmlTag as EbmlTag;
 pub use ebml_iterable_specification::TagDataType as TagDataType;
 pub use ebml_iterable_specification::Master as Master;

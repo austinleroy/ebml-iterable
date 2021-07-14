@@ -2,7 +2,7 @@
 binary version of XML. It's used for container formats like [WebM][webm] or
 [MKV][mkv].
 
-> IMPORTANT: The iterator contained in this crate is spec-agnostic and requires a specification implementing the `EbmlSpecification` trait to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
+> IMPORTANT: The iterator contained in this crate is spec-agnostic and requires a specification implementing the `EbmlSpecification` and `EbmlTag` traits to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
 
 > KNOWN LIMITATION: This library was not built to work with an "Unknown Data Size" as defined in [RFC8794][rfc8794]. As such, it likely will not support streaming applications and will only work on complete datasets.
 
@@ -14,54 +14,54 @@ ebml-iterable = "0.2.0"
 # Usage
 
 The `TagIterator` struct implements Rust's standard [Iterator][rust-iterator] trait.
-This struct can be created with the `new` function on any source that implements the standard [Read][rust-read] trait. The iterator outputs `SpecTag` objects reflecting the type of tag (based on the defined specification) and the tag data.
+This struct can be created with the `new` function on any source that implements the standard [Read][rust-read] trait. The iterator outputs `TSpec` objects based on the defined specification and the tag data.
 
 > Note: The `with_capacity` method can be used to construct a `TagIterator` with a specified default buffer size.  This is only useful as a microoptimization to memory management if you know the maximum tag size of the file you're reading.
 
-The data in the `TagPosition` property can then be modified as desired (encryption, compression, etc.) and reencoded using the `TagWriter` struct. This struct can be created with the `new` function on any source that implements the standard [Write][rust-write] trait. Once created, this struct can encode EBML using the `write` method on any `TagPosition` objects regardless of whether they came from a `TagIterator`.  This will emit binary EBML to the underlying `Write` destination.
+The data in the tag can then be modified as desired (encryption, compression, etc.) and reencoded using the `TagWriter` struct. This struct can be created with the `new` function on any source that implements the standard [Write][rust-write] trait. Once created, this struct can encode EBML using the `write` method on any objects that implement `EbmlSpecification` and `EbmlTag` regardless of whether they came from a `TagIterator`.  This will emit binary EBML to the underlying `Write` destination.
 
-## TagPosition Enum
+## Master Enum
 
-`TagPosition` is an enumeration of three different classifications of tags that this library understands:
+Most tag types contain their data directly, but there is a category of tag in EBML called `Master` which contains other tags. This crate contains an enumeration of three different classifications of master tags:
 
-  * `StartTag(u64)` is a marker for the beginning of a "master" tag as defined in EBML.  Master tags are simply containers for other tags.  The u64 value is the "id" of the tag.
-  * `EndTag(u64)` is a marker for the end of a "master" tag.  The u64 value is the "id" of the tag.
-  * `FullTag(id, TagData)` is a complete tag that includes both the id and full data of the tag.  The TagData value is described in more detail below.
+  * `Start` is a marker for the beginning of a "master" tag.
+  * `End` is a marker for the end of a "master" tag.
+  * `Full(children)` is a complete tag that includes all child tags of the `Master` tag.  This is only emitted by the `TagIterator` for tag types passed in via `tags_to_buffer`.
 
-## DataTag and DataTagType
+## TagDataType
 
 ```rs
-pub enum TagData {
-    Master(Vec<(u64, TagData)>),
-    UnsignedInt(u64),
-    Integer(i64),
-    Utf8(String),
-    Binary(Vec<u8>),
-    Float(f64),
+pub enum TagDataType {
+    Master,
+    UnsignedInt,
+    Integer,
+    Utf8,
+    Binary,
+    Float,
 }
 ```
 
-TagData is an enum containing data stored within a tag.  It is important to note that the type of data contained in the tag directly corresponds to the tag id as defined in whichever specification is in use.  Because EBML is binary, the correct specification is required to parse tag content.  
+TagDataType is an enum containing the possible data types stored within a tag.  The relationship between the tag variant and the type of data contained in the tag directly corresponds is defined by whichever specification is in use.  Because EBML is binary, the correct specification is required to parse tag content.  
 
-  * Master(Vec<(u64, TagData)>): A complete master tag containing any number of child tags.
-  * UnsignedInt(u64): An unsigned integer.
-  * Integer(i64): A signed integer.
-  * Utf8(String): A Unicode text string.  Note that the [EBML spec][rfc8794] includes a separate element type for ASCII.  Given that ASCII is a subset of Utf8, this library currently parses and encodes both types using the same Utf8 element.
-  * Binary(Vec<u8>): Binary data, otherwise uninterpreted.
-  * Float(f64): IEEE-754 floating point number.
+  * Master: A complete master tag containing any number of child tags.
+  * UnsignedInt: An unsigned integer.
+  * Integer: A signed integer.
+  * Utf8: A Unicode text string.  Note that the [EBML spec][rfc8794] includes a separate element type for ASCII.  Given that ASCII is a subset of Utf8, this library currently parses and encodes both types using the same Utf8 logic.
+  * Binary: Binary data, otherwise uninterpreted.
+  * Float: IEEE-754 floating point number.
 
 > Note: This library made a concious decision to not parse "Date" elements from EBML due to lack of built-in support for dates in Rust. Specification implementations should treat Date elements as Binary so that consumers have the option of parsing the unaltered data using their library of choice, if needed.
 
 # Specification Implementation
 
-Any specification based on EBML can use this library to parse or write binary data.  Writing needs nothing special, but parsing requires a struct implementing the `EbmlSpecification` trait.  This trait currently requires implementation of two methods - `get_tag` and `get_tag_id`.  These are used to convert between specific tag instances and ids.  Implementation can be simplified by enabling the `"derive-spec"` feature flag and using the provided macro.  Custom specification implementations can refer to [webm-iterable][webm-iterable] as an example.
+Any specification based on EBML can use this library to parse or write binary data.  Writing needs nothing special (if you use the `write_raw()` method), but parsing requires a struct implementing the `EbmlSpecification` and `EbmlTag` traits.  These traits currently have a large number of methods to implement and need consistent implementations to avoid errors, so any implementation attempt is recommended to use the `"derive-spec"` feature flag in this crate and using the provided macro.  Custom specification implementations can refer to [webm-iterable][webm-iterable] as an example.
 
 # Features
  
 There is currently only one optional feature in this crate, but that may change over time as needs arise.
  
 * **derive-spec** -
-    When enabled, this provides a macro to simplify implementations of the `EbmlSpecification` trait.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
+    When enabled, this provides a macro to simplify implementations of the `EbmlSpecification` and `EbmlTag` traits.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
 
 
 # State of this project
