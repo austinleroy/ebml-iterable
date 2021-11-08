@@ -248,7 +248,7 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
         if self.internal_buffer_position == self.buffered_byte_length {
             //If we've already consumed the entire internal buffer
             //ensure there is nothing else in the data source before returning `None`
-            let read_result = self.ensure_data_read(self.internal_buffer_position);
+            let read_result = self.ensure_data_read(1);
             match read_result {
                 Err(err) => return Some(Err(err)),
                 Ok(data_remaining) => {
