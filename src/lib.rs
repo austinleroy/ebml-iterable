@@ -42,4 +42,9 @@ pub mod error {
     //!
     pub use super::errors::tag_iterator::TagIteratorError;
     pub use super::errors::tag_writer::TagWriterError;
+
+    ///
+    /// Error details that may be included in some thrown errors
+    ///
+    pub use super::errors::tool::ToolError; 
 }
