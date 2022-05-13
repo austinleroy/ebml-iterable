@@ -122,7 +122,7 @@ impl<W: Write> TagWriter<W>
         let size_vint = size.as_vint().map_err(|e| TagWriterError::TagSizeError(e.to_string()))?;
         self.working_buffer.extend_from_slice(&size_vint);
 
-        self.working_buffer.extend_from_slice(&data);
+        self.working_buffer.extend_from_slice(data);
         Ok(())
     }
 
@@ -206,7 +206,7 @@ impl<W: Write> TagWriter<W>
         }
 
         if self.open_tags.is_empty() {
-            self.dest.write_all(&self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
+            self.dest.write_all(self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
             self.dest.flush().map_err(|source| TagWriterError::WriteError { source })?;
         }
 
@@ -240,7 +240,7 @@ impl<W: Write> TagWriter<W>
         self.write_binary_tag(tag_id, data)?;
         
         if self.open_tags.is_empty() {
-            self.dest.write_all(&self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
+            self.dest.write_all(self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
             self.dest.flush().map_err(|source| TagWriterError::WriteError { source })?;
         }
         
