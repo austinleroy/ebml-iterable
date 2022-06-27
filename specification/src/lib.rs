@@ -101,12 +101,6 @@ pub trait EbmlSpecification<T: EbmlSpecification<T> + EbmlTag<T> + Clone> {
     ///
     fn get_raw_tag(id: u64, data: &[u8]) -> T;
 
-    ///
-    /// Tests if [id] is a root element
-    ///
-    /// Used to determine if Unknown size blocks should end
-    ///
-    fn is_root(id: u64) -> bool;
 }
 
 ///
@@ -170,16 +164,14 @@ pub trait EbmlTag<T: Clone> {
     ///
     /// Tests if [id] is a child of self
     ///
-    /// Used to determine if Unknown size blocks should end
+    /// Default is [true]
+    /// Unknown or unexpected elements are children. Global elements are children.
+    ///
+    /// Used to determine if Unknown size blocks should end. If [is_child] returns false, the Unknown size block ends.
+    ///
+    /// [`Spec`](https://github.com/ietf-wg-cellar/ebml-specification/blob/master/specification.markdown#unknown-data-size) does not explicitly state what to do in case of an unexpected element, so we assume it will be handled like a child element since it is not one of the end conditions.
     ///
     fn is_child(&self, id: u64) -> bool;
-
-    ///
-    /// Tests if [id] is a parent of self
-    ///
-    /// Used to determine if Unknown size blocks should end
-    ///
-    fn is_parent(&self, id: u64) -> bool;
 }
 
 ///

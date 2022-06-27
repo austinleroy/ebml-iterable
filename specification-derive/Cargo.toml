@@ -16,3 +16,4 @@ proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "1.0", features = ["full"] }
 ebml-iterable-specification = { version = "=0.2.0", path = "../specification" }
+itertools = "0.10.3"

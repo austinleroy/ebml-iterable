@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use proc_macro2::TokenStream;
 use syn::{ItemEnum, Error, Generics, Ident, Result, LitInt, Path};
 
@@ -15,6 +16,7 @@ pub struct Variant<'a> {
     pub ident: Ident,
     pub id_attr: (u64, Attribute<'a>),
     pub data_type_attr: (TagDataType, Path, Attribute<'a>),
+    pub parent_attr: Option<(Ident, Attribute<'a>)>,
 }
 
 pub struct Attribute<'a> {
@@ -24,10 +26,11 @@ pub struct Attribute<'a> {
 
 impl<'a> Enum<'a> {
     pub fn from_syn(node: &'a ItemEnum) -> Result<Self> {
+        let variant_names: HashSet<_> = node.variants.iter().map(|var|var.ident.clone()).collect();
         let variants = node
             .variants
             .iter()
-            .map(|node| Variant::from_syn(node))
+            .map(|node| Variant::from_syn(node, &variant_names))
             .collect::<Result<_>>()?;
 
         Ok(Enum {
@@ -40,9 +43,10 @@ impl<'a> Enum<'a> {
 }
 
 impl<'a> Variant<'a> {
-    fn from_syn(node: &'a syn::Variant) -> Result<Self> {
+    fn from_syn(node: &'a syn::Variant, variant_names: &HashSet<Ident>) -> Result<Self> {
         let mut id_attr: Option<(u64, Attribute<'a>)> = None;
         let mut data_type_attr: Option<(TagDataType, Path, Attribute<'a>)> = None;
+        let mut parent_attr: Option<(Ident, Attribute<'a>)> = None;
     
         for attr in &node.attrs {
             if attr.path.is_ident("id") {
@@ -84,24 +88,37 @@ impl<'a> Variant<'a> {
                     original: &attr,
                     tokens: &attr.tokens,
                 }));
-            } 
+            } else if attr.path.is_ident("parent") {
+                if parent_attr.is_some() {
+                    return Err(Error::new_spanned(node, "duplicate #[parent()] attribute"));
+                }
+                let ident = attr.parse_args::<syn::Ident>().map_err(|err| Error::new(err.span(), "#[parent()] must be Spec variant name"))?;
+                if node.ident == ident {
+                    return Err(Error::new_spanned(node, "#[parent()] cannot be self"))
+                }
+                // take from set to keep proper span in case of errors
+                let def = variant_names.get(&ident).ok_or_else(|| Error::new(ident.span(), "#[parent()] must be Spec variant"))?.clone();
+                parent_attr = Some((def, Attribute {
+                    original: &attr,
+                    tokens: &attr.tokens,
+                }))
+            }
         }
 
-        if id_attr.is_none() {
+        let id_attr = if let Some(id_attr) = id_attr { id_attr } else {
             return Err(Error::new_spanned(node, "#[id] attribute is required when using #[ebml_specification] attribute"));
-        }
-        let id_attr = id_attr.unwrap();
+        };
 
-        if data_type_attr.is_none() {
+        let data_type_attr = if let Some(data_type_attr) = data_type_attr { data_type_attr } else {
             return Err(Error::new_spanned(node, "#[data_type] attribute is required when using #[ebml_specification] attribute"));
-        }
-        let data_type_attr = data_type_attr.unwrap();
+        };
 
         Ok(Variant {
             original: node,
             ident: node.ident.clone(),
             id_attr,
             data_type_attr,
+            parent_attr
         })
     }
 }

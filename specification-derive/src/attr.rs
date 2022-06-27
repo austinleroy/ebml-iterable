@@ -1,10 +1,11 @@
 use proc_macro2::TokenStream;
 use std::str::FromStr;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use syn::spanned::Spanned;
 use syn::{Attribute, ItemEnum, Result, Error, Visibility, Fields, FieldsUnnamed, Path, Ident, Variant};
 use quote::{quote, quote_spanned};
 use ebml_iterable_specification::TagDataType;
+use itertools::Itertools;
 
 use super::ast::Enum;
 
@@ -18,6 +19,24 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
             err.combine(Error::new_spanned(original, "#[id()] already used previously"));
             return Err(err);
         } 
+    }
+
+    // detect circular hierarchy
+    let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
+    for origin in &input.variants {
+        let mut explored: HashMap<&Ident, &crate::ast::Variant> = HashMap::new();
+        let mut id = Some(origin);
+        while let Some(var) = id {
+            if explored.contains_key(&var.ident) {
+                return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, "#[parent()] chain is circular")).reduce(|mut a, b| {
+                    a.combine(b);
+                    a
+                }).unwrap());
+            } else {
+                explored.insert(&var.ident, var);
+                id = var.parent_attr.as_ref().map(|(id, _)| *map.get(id).unwrap())
+            }
+        }
     }
 
     let ebml_specification_impl = get_impl(input)?;
@@ -60,7 +79,7 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
         };
 
         var.attrs.retain(|a| {
-            if a.path.is_ident("id") || a.path.is_ident("data_type") {
+            if a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("parent") {
                 false
             } else {
                 true
@@ -112,6 +131,41 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             }
         }
     };
+
+    let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
+    let parents: HashMap<_, Vec<_>> = input.variants.iter()
+        .filter_map(|var| var.parent_attr.as_ref().map(|(ident, _)| (ident, var)))
+        .group_by(|(ident, _)| *ident).into_iter()
+        .map(|(k, g)| (k, g.map(|(_, v)|v).collect())).collect();
+    let roots: Vec<u64> = input.variants.iter().filter_map(|it| if it.parent_attr.is_none() { Some(it.id_attr.0) } else { None }).collect();
+
+    let is_child = input.variants.iter().map(|var: &crate::ast::Variant| {
+        let name = &var.ident;
+        let siblings = var.parent_attr.iter().flat_map(|(ident, _)| {
+            parents.get(&ident).unwrap().iter().map(|var|var.id_attr.0)
+        });
+        let parents = itertools::unfold(Some(var), |state| {
+            if let Some(var) = *state {
+                *state = var.parent_attr.as_ref().map(|(ident, _)| *map.get(ident).unwrap());
+                Some(var.id_attr.0)
+            } else {
+                None
+            }
+        });
+
+        let mut ids: BTreeSet<u64> = BTreeSet::new();
+        ids.extend(&roots);
+        ids.extend(parents);
+        ids.extend(siblings);
+        let len = ids.len();
+
+        quote! {
+            #ty::#name(_) => {
+                const NOT_CHILDREN: [u64;#len] = [#(#ids),*];
+                NOT_CHILDREN.binary_search(&id).is_err()
+            },
+        }
+    });
 
     let get_unsigned_int_tag = input.variants.iter()
         .filter(|v| matches!(&v.data_type_attr.0, TagDataType::UnsignedInt))
@@ -272,6 +326,13 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
                 match self {
                     #(#as_master)*
                     _ => None,
+                }
+            }
+
+            fn is_child(&self, id: u64) -> bool {
+                match self {
+                    #(#is_child)*
+                    #ty::RawTag(..) => false,
                 }
             }
         }
