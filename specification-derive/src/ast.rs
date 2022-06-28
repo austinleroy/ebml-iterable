@@ -47,7 +47,7 @@ impl<'a> Variant<'a> {
         let mut id_attr: Option<(u64, Attribute<'a>)> = None;
         let mut data_type_attr: Option<(TagDataType, Path, Attribute<'a>)> = None;
         let mut parent_attr: Option<(Ident, Attribute<'a>)> = None;
-    
+
         for attr in &node.attrs {
             if attr.path.is_ident("id") {
                 if id_attr.is_some() {

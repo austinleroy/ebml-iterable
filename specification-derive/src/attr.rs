@@ -18,7 +18,7 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
             let mut err = Error::new_spanned(var.original, "duplicate #[id()] detected");
             err.combine(Error::new_spanned(original, "#[id()] already used previously"));
             return Err(err);
-        } 
+        }
     }
 
     // detect circular hierarchy
@@ -57,10 +57,10 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
             .iter()
             .find(|a| a.path.is_ident("data_type"))
             .expect("#[data_type()] attribute required for variants under #[ebml_specification]");
-            
+
         let data_type_path = data_type_attribute.parse_args::<Path>().map_err(|err| Error::new(err.span(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
         let data_type = get_last_path_ident(&data_type_path).ok_or(Error::new_spanned(data_type_attribute.clone(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
-        
+
         let data_type = if data_type == "Master" {
             let orig_ident = &original.ident;
             quote!( (#spanned_master_enum<#orig_ident>) )
@@ -123,7 +123,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let name = &var.ident;
             let id = &var.id_attr.0;
             let ret_val = TokenStream::from_str(&ret_val).expect("Misuse of get_tag function in ebml_iterable_specification_derive_attr");
-    
+
             quote! {
                 if id == #id {
                     Some(#ty::#name(#ret_val))
@@ -157,6 +157,8 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
         ids.extend(&roots);
         ids.extend(parents);
         ids.extend(siblings);
+        ids.remove(&0xBF); // Remove global CRC 32 element
+        ids.remove(&0xEC); // Remove global Void 32 element
         let len = ids.len();
 
         quote! {
@@ -228,7 +230,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
     let ebml_tag_trait = spanned_ebml_tag_trait(input.original);
     let tag_data_type = spanned_tag_data_type(input.original);
 
-    Ok(quote! {        
+    Ok(quote! {
         impl #impl_generics #ebml_spec_trait <#ty> for #ty #ty_generics #where_clause {
             fn get_tag_data_type(id: u64) -> #tag_data_type {
                 #(#get_tag_data_type else)* {

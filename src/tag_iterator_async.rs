@@ -23,7 +23,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {
 
-    fn new(read: R) -> Self {
+    pub fn new(read: R) -> Self {
         Self {
             read,
             buf: Default::default(),
