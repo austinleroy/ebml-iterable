@@ -1,38 +1,32 @@
-use std::io::{Read, Cursor};
+use std::io::{Cursor, Read};
 use std::convert::TryInto;
 use std::collections::HashSet;
+use std::mem;
+use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
+use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag};
+use crate::tag_iterator_util::ProcessingTag::{EndTag, NextTag};
 
 use super::tools;
-use super::specs::{EbmlSpecification, EbmlTag, TagDataType, Master};
+use super::specs::{EbmlSpecification, EbmlTag, Master, TagDataType};
 use super::errors::tag_iterator::TagIteratorError;
 use super::errors::tool::ToolError;
 
-struct ProcessingTag<TSpec> 
-    where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
-{
-    end_tag: TSpec,
-    size: usize,
-    start: usize,
-}
-
-const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
-
 ///
 /// Provides an iterator over EBML files (read from a source implementing the [`std::io::Read`] trait). Can be configured to read specific "Master" tags as complete objects rather than just emitting when they start and end.
-/// 
+///
 /// This is a generic struct that requires a specification implementing [`EbmlSpecification`] and [`EbmlTag`]. No specifications are included in this crate - you will need to either use another crate providing a spec (such as the Matroska spec implemented in the [webm-iterable](https://crates.io/crates/webm_iterable) or write your own spec if you want to iterate over a custom EBML file. The iterator outputs `TSpec` variants representing the type of tag (defined by the specification) and the accompanying tag data. "Master" tags (defined by the specification) usually will be read as `Start` and `End` variants, but the iterator can be configured to buffer Master tags into a `Full` variant using the `tags_to_buffer` parameter.
-/// 
+///
 /// Note: The [`Self::with_capacity()`] method can be used to construct a `TagIterator` with a specified default buffer size.  This is only useful as a microoptimization to memory management if you know the maximum tag size of the file you're reading.
-/// 
+///
 /// ## Example
-/// 
+///
 /// ```no_run
 /// use std::fs::File;
 /// use ebml_iterable::TagIterator;
 /// #
 /// # use ebml_iterable::specs::{EbmlSpecification, TagDataType};
 /// # use ebml_iterable_specification::empty_spec::EmptySpec;
-/// 
+///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let file = File::open("my_ebml_file.ebml")?;
 /// let mut my_iterator: TagIterator<_, EmptySpec> = TagIterator::new(file, &[]);
@@ -42,9 +36,9 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 /// # Ok(())
 /// # }
 /// ```
-/// 
+///
 /// ## Errors
-/// 
+///
 /// The `Item` type for the associated [`Iterator`] implementation is a [`Result<TSpec, TagIteratorError>`], meaning each `next()` call has the potential to fail.  This is because the source data is not parsed all at once - it is incrementally parsed as the iterator progresses.  If the iterator runs into an error (such as corrupted data or an unexpected end-of-file), it needs to be propagated to the logic trying to read the tags.  The different possible error states are enumerated in [`TagIteratorError`].
 ///
 /// ## Panics
@@ -52,8 +46,8 @@ const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 /// The iterator can panic if `<TSpec>` is an internally inconsistent specification (i.e. it claims that a specific tag id has a specific data type but fails to produce a tag variant using data of that type).  This won't happen if the specification being used was created using the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) attribute macro.
 ///
 
-pub struct TagIterator<R: Read, TSpec> 
-    where 
+pub struct TagIterator<R: Read, TSpec>
+    where
     TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {
     source: R,
@@ -68,11 +62,11 @@ pub struct TagIterator<R: Read, TSpec>
 }
 
 impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
-    where 
+    where
     TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {
 
-    /// 
+    ///
     /// Returns a new [`TagIterator<TSpec>`] instance.
     ///
     /// The `source` parameter must implement [`std::io::Read`].  The second argument, `tags_to_buffer`, specifies which "Master" tags should be read as [`Master::Full`]s rather than as [`Master::Start`] and [`Master::End`]s.  Refer to the documentation on [`TagIterator`] for more explanation of how to use the returned instance.
@@ -80,7 +74,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
     pub fn new(source: R, tags_to_buffer: &[TSpec]) -> Self {
         TagIterator::with_capacity(source, tags_to_buffer, DEFAULT_BUFFER_LEN)
     }
-    
+
     ///
     /// Returns a new [`TagIterator<TSpec>`] instance with the specified internal buffer capacity.
     ///
@@ -126,8 +120,8 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
     fn ensure_data_read(&mut self, length: usize) -> Result<bool, TagIteratorError> {
         if self.internal_buffer_position + length <= self.buffered_byte_length {
             return Ok(true)
-        } 
-        
+        }
+
         if self.buffer_offset.is_none() {
             if !self.private_read(0)? {
                 return Ok(false);
@@ -159,7 +153,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
         }
     }
 
-    fn read_tag_size(&mut self) -> Result<usize, TagIteratorError> {
+    fn read_tag_size(&mut self) -> Result<EBMLSize, TagIteratorError> {
         self.ensure_data_read(8)?;
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
@@ -171,7 +165,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
     }
 
     fn read_tag_data(&mut self, size: usize) -> Result<&[u8], TagIteratorError> {
-        self.ensure_capacity(size);        
+        self.ensure_capacity(size);
         if !self.ensure_data_read(size)? {
             return Err(TagIteratorError::CorruptedFileData(String::from("reached end of file but expecting more data")));
         }
@@ -182,22 +176,26 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
 
     fn read_tag(&mut self) -> Result<TSpec, TagIteratorError> {
         let tag_id = self.read_tag_id()?;
-        let size: usize = self.read_tag_size()?;
+        let size: EBMLSize = self.read_tag_size()?;
 
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
 
         let is_master = matches!(spec_tag_type, TagDataType::Master);
-        if is_master && !self.buffer_all && !self.tag_ids_to_buffer.contains(&tag_id) {
-            self.tag_stack.push(ProcessingTag {
-                end_tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
+        let tag = if is_master && (size == Unknown || (!self.buffer_all && !self.tag_ids_to_buffer.contains(&tag_id))) {
+            self.tag_stack.push(EndTag {
+                tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
                 size,
                 start: self.current_offset(),
             });
 
-            Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)))
+            TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id))
         } else {
-            let raw_data = self.read_tag_data(size)?;
-            let tag_data = match spec_tag_type {
+            let raw_data = if let Known(size) = size {
+                self.read_tag_data(size)?
+            } else {
+                unreachable!("Unknown size for primitive or buffered tags is not allowed")
+            };
+            match spec_tag_type {
                 TagDataType::Master => {
                     let mut src = Cursor::new(raw_data);
                     let mut sub_iterator: TagIterator<_, TSpec> = TagIterator::new(&mut src, &[]);
@@ -225,9 +223,13 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                     let val = tools::arr_to_f64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                     TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id))
                 },
-            };
+            }
+        };
 
-            Ok(tag_data)
+        if self.tag_stack.last().map(|it| tag.is_child(it.get_id())).unwrap_or(true) {
+            Ok(tag)
+        } else {
+            Ok(mem::replace(self.tag_stack.last_mut().unwrap(), NextTag { tag }).into_inner())
         }
     }
 }
@@ -238,10 +240,17 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
     type Item = Result<TSpec, TagIteratorError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(tag) = self.tag_stack.last() {
-            if self.current_offset() >= tag.start + tag.size {
-                let tag = self.tag_stack.pop().unwrap();
-                return Some(Ok(tag.end_tag));
+        if let Some(tag) = self.tag_stack.pop() {
+            match tag {
+                EndTag { size, start, tag } => {
+                    if let Known(size) = size {
+                        if self.current_offset() >= start + size {
+                            return Some(Ok(tag));
+                        }
+                    }
+                    self.tag_stack.push(EndTag { size, start, tag });
+                },
+                NextTag { tag } => return Some(Ok(tag))
             }
         }
 

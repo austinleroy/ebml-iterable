@@ -165,6 +165,7 @@ pub trait EbmlTag<T: Clone> {
     /// Tests if [id] is a child of self
     ///
     /// Default is [true]
+    ///
     /// Unknown or unexpected elements are children. Global elements are children.
     ///
     /// Used to determine if Unknown size blocks should end. If [is_child] returns false, the Unknown size block ends.
