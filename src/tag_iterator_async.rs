@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::iter::repeat;
 use std::mem;
 use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master, TagDataType};
@@ -8,6 +9,11 @@ use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::ProcessingTag::{EndTag, NextTag};
 use crate::tools;
 
+///
+/// This Can be transformed into a [`Stream`] using [`into_stream`], or consumed directly by calling [`.next().await`] in a loop.
+///
+/// The struct can be created with the [`new()`] function on any source that implements the [`futures::AsyncRead`] trait.
+///
 pub struct TagIteratorAsync<R: AsyncRead + Unpin, TSpec>
     where
         TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
@@ -52,7 +58,18 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         if size < len {
             let remaining = len - size;
             self.buf.extend(repeat(0).take(remaining));
-            self.read.read_exact(&mut self.buf[size..]).await.map_err(|source| TagIteratorError::ReadError { source })?
+            match self.read.read_exact(&mut self.buf[size..]).await {
+                Err(source) => {
+                    return match source.kind() {
+                        ErrorKind::UnexpectedEof => {
+                            Ok(false)
+                        }
+                        _ => Err(TagIteratorError::ReadError { source })?
+                    }
+
+                }
+                _ => {}
+            }
         }
         Ok(true)
     }
@@ -145,6 +162,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         }
     }
 
+    /// can be consumed
     pub async fn next(&mut self) -> Option<Result<TSpec, TagIteratorError>> {
         if let Some(tag) = self.tag_stack.pop() {
             match tag {
@@ -157,6 +175,14 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                     self.tag_stack.push(EndTag { size, start, tag });
                 },
                 NextTag { tag } => return Some(Ok(tag))
+            }
+        }
+        match self.ensure_data_read(1).await {
+            Err(err) => return Some(Err(err)),
+            Ok(data_remaining) => {
+                if !data_remaining {
+                    return None;
+                }
             }
         }
         Some(self.read_tag().await)
