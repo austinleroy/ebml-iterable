@@ -188,7 +188,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         Some(self.read_tag().await)
     }
 
-    pub async fn into_stream(self) -> impl Stream<Item=Result<TSpec, TagIteratorError>> {
+    pub fn into_stream(self) -> impl Stream<Item=Result<TSpec, TagIteratorError>> {
         futures::stream::unfold(self, |mut read| async {
             let next = read.next().await;
             next.map(move |it| (it, read))
