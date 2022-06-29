@@ -1,12 +1,11 @@
 use proc_macro2::TokenStream;
 use std::str::FromStr;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use syn::spanned::Spanned;
 use syn::{Attribute, ItemEnum, Result, Error, Visibility, Fields, FieldsUnnamed, Path, Ident, Variant};
 use quote::{quote, quote_spanned, ToTokens};
 use ebml_iterable_specification::TagDataType;
 use ebml_iterable_specification::TagDataType::Master;
-use itertools::Itertools;
 
 use super::ast::Enum;
 
@@ -119,9 +118,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let data_type = &var.data_type_attr.1;
 
             quote! {
-                if id == #id {
-                    #data_type
-                }
+                #id => #data_type,
             }
         });
 
@@ -141,25 +138,25 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let ret_val = TokenStream::from_str(&ret_val).expect("Misuse of get_tag function in ebml_iterable_specification_derive_attr");
 
             quote! {
-                if id == #id {
-                    Some(#ty::#name(#ret_val))
-                }
+                #id => Some(#ty::#name(#ret_val)),
             }
         }
     };
 
     let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
-    let parents: HashMap<_, Vec<_>> = input.variants.iter()
-        .filter_map(|var| var.parent_attr.as_ref().map(|(ident, _)| (ident, var)))
-        .group_by(|(ident, _)| *ident).into_iter()
-        .map(|(k, g)| (k, g.map(|(_, v)|v).collect())).collect();
+    let mut parents: HashMap<_, Vec<_>> = HashMap::new();
+    for var in input.variants.iter() {
+        if let Some((parent, _)) = var.parent_attr.as_ref() {
+            parents.entry(parent).or_default().push(var.id_attr.0);
+        }
+    }
 
     let roots: Vec<u64> = input.variants.iter().filter_map(|it| if it.parent_attr.is_none() { Some(it.id_attr.0) } else { None }).collect();
 
     let is_child = input.variants.iter().map(|var: &crate::ast::Variant| {
         let name = &var.ident;
         let siblings = var.parent_attr.iter().flat_map(|(ident, _)| {
-            parents.get(&ident).unwrap().iter().map(|var|var.id_attr.0)
+            parents.get(&ident).unwrap().iter().copied()
         });
         let parents = itertools::unfold(Some(var), |state| {
             if let Some(var) = *state {
@@ -250,44 +247,53 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
     Ok(quote! {
         impl #impl_generics #ebml_spec_trait <#ty> for #ty #ty_generics #where_clause {
             fn get_tag_data_type(id: u64) -> #tag_data_type {
-                #(#get_tag_data_type else)* {
-                    #tag_data_type::Binary
+                match id {
+                    #(#get_tag_data_type)*
+                    _ => {
+                        #tag_data_type::Binary
+                    }
                 }
             }
 
             fn get_unsigned_int_tag(id: u64, data: u64) -> Option<#ty> {
-                #(#get_unsigned_int_tag else)* {
-                    None
+                match id {
+                    #(#get_unsigned_int_tag)*
+                    _ => None
                 }
             }
 
             fn get_signed_int_tag(id: u64, data: i64) -> Option<#ty> {
-                #(#get_signed_int_tag else)* {
-                    None
+                match id {
+                    #(#get_signed_int_tag)*
+                    _ => None
                 }
             }
 
             fn get_utf8_tag(id: u64, data: String) -> Option<#ty> {
-                #(#get_utf8_tag else)* {
-                    None
+                match id {
+                    #(#get_utf8_tag)*
+                    _ => None
                 }
             }
 
             fn get_binary_tag(id: u64, data: &[u8]) -> Option<#ty> {
-                #(#get_binary_tag else)* {
-                    None
+                match id {
+                    #(#get_binary_tag)*
+                    _ => None
                 }
             }
 
             fn get_float_tag(id: u64, data: f64) -> Option<#ty> {
-                #(#get_float_tag else)* {
-                    None
+                match id {
+                    #(#get_float_tag)*
+                    _ => None
                 }
             }
 
             fn get_master_tag(id: u64, data: #spanned_master_enum<#ty>) -> Option<#ty> {
-                #(#get_master_tag else)* {
-                    None
+                match id {
+                    #(#get_master_tag)*
+                    _ => None
                 }
             }
 

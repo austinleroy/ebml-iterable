@@ -59,6 +59,13 @@ impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag
             NextTag { tag } => tag
         }
     }
+
+    pub fn inner(&self) -> &TSpec {
+        match self {
+            EndTag { tag,.. } => tag,
+            NextTag { tag } => tag
+        }
+    }
 }
 
 pub const DEFAULT_BUFFER_LEN: usize = 1024 * 64;

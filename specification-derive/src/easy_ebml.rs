@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use syn::{Attribute, AttrStyle, Ident, LitInt, parse::Parse, Path, Token, Variant, Visibility};
+use syn::{Attribute, AttrStyle, Ident, LitInt, parse::Parse, Token, Variant, Visibility};
 use syn::parse::{ParseBuffer, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::Result;

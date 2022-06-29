@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fmt::format;
 use proc_macro2::TokenStream;
 use syn::{ItemEnum, Error, Generics, Ident, Result, LitInt, Path};
 

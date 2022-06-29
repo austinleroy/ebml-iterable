@@ -109,13 +109,30 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         let size = self.read_tag_size().await?;
 
         let is_master = matches!(spec_tag_type, TagDataType::Master);
-        let tag = if is_master {
-            self.tag_stack.push(EndTag {
+        let is_child = self.tag_stack.last().map(|it| {
+            match it {
+                NextTag {..} => true,
+                EndTag { size, tag: parent, .. } => {
+                    // The unknown check is there to still support proper parsing of badly formatted files.
+                    *size != Unknown || parent.is_child(tag_id)
+                }
+            }
+        }).unwrap_or(true);
+        if is_master {
+            let end_tag = EndTag {
                 tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
                 size,
                 start: self.current_offset(),
-            });
-            return Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)));
+            };
+            let start_tag = TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id));
+            if is_child {
+                self.tag_stack.push(end_tag);
+                Ok(start_tag)
+            } else {
+                let tag = mem::replace(self.tag_stack.last_mut().unwrap(), end_tag).into_inner();
+                self.tag_stack.push(NextTag { tag: start_tag });
+                Ok(tag)
+            }
         } else {
             let size = if let Known(size) = size {
                 size
@@ -123,7 +140,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                 return Err(TagIteratorError::CorruptedFileData("Unknown size for primitive not allowed".into()));
             };
             let raw_data = self.read_tag_data(size).await?;
-            match spec_tag_type {
+            let tag = match spec_tag_type {
                 TagDataType::Master => { unreachable!("Master should have been handled before querying data") },
                 TagDataType::UnsignedInt => {
                     let val = tools::arr_to_u64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
@@ -144,21 +161,12 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                     let val = tools::arr_to_f64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                     TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id))
                 },
+            };
+            if is_child {
+                Ok(tag)
+            } else {
+                Ok(mem::replace(self.tag_stack.last_mut().unwrap(), NextTag { tag }).into_inner())
             }
-        };
-
-        if self.tag_stack.last().map(|it| {
-            match it {
-                NextTag {..} => true,
-                EndTag { size, .. } => {
-                    // The unknown check is there to still support proper parsing of badly formatted files.
-                    *size != Unknown || tag.is_child(it.get_id())
-                }
-            }
-        }).unwrap_or(true) {
-            Ok(tag)
-        } else {
-            Ok(mem::replace(self.tag_stack.last_mut().unwrap(), NextTag { tag }).into_inner())
         }
     }
 
@@ -181,7 +189,11 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             Err(err) => return Some(Err(err)),
             Ok(data_remaining) => {
                 if !data_remaining {
-                    return None;
+                    return if let Some(tag) = self.tag_stack.pop() {
+                        Some(Ok(tag.into_inner()))
+                    } else {
+                        None
+                    }
                 }
             }
         }
