@@ -188,7 +188,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                 start: self.current_offset(),
             });
 
-            TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id))
+            return Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)));
         } else {
             let raw_data = if let Known(size) = size {
                 self.read_tag_data(size)?
@@ -226,7 +226,15 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
             }
         };
 
-        if self.tag_stack.last().map(|it| tag.is_child(it.get_id())).unwrap_or(true) {
+        if self.tag_stack.last().map(|it| {
+            match it {
+                NextTag {..} => true,
+                EndTag { size, .. } => {
+                    // The unknown check is there to still support proper parsing of badly formatted files.
+                    *size != Unknown || tag.is_child(it.get_id())
+                }
+            }
+        }).unwrap_or(true) {
             Ok(tag)
         } else {
             Ok(mem::replace(self.tag_stack.last_mut().unwrap(), NextTag { tag }).into_inner())

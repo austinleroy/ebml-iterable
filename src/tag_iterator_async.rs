@@ -4,7 +4,7 @@ use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master, TagDataTyp
 use futures::{AsyncRead, AsyncReadExt, Stream};
 use crate::error::{TagIteratorError, ToolError};
 use crate::tag_iterator_util::{EBMLSize, ProcessingTag};
-use crate::tag_iterator_util::EBMLSize::Known;
+use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::ProcessingTag::{EndTag, NextTag};
 use crate::tools;
 
@@ -98,7 +98,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                 size,
                 start: self.current_offset(),
             });
-            TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id))
+            return Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)));
         } else {
             let size = if let Known(size) = size {
                 size
@@ -130,7 +130,15 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             }
         };
 
-        if self.tag_stack.last().map(|it| tag.is_child(it.get_id())).unwrap_or(true) {
+        if self.tag_stack.last().map(|it| {
+            match it {
+                NextTag {..} => true,
+                EndTag { size, .. } => {
+                    // The unknown check is there to still support proper parsing of badly formatted files.
+                    *size != Unknown || tag.is_child(it.get_id())
+                }
+            }
+        }).unwrap_or(true) {
             Ok(tag)
         } else {
             Ok(mem::replace(self.tag_stack.last_mut().unwrap(), NextTag { tag }).into_inner())
