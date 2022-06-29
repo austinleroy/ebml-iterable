@@ -103,7 +103,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             let size = if let Known(size) = size {
                 size
             } else {
-                unreachable!("Unknown size for primitive not allowed")
+                return Err(TagIteratorError::CorruptedFileData("Unknown size for primitive not allowed".into()));
             };
             let raw_data = self.read_tag_data(size).await?;
             match spec_tag_type {

@@ -1,8 +1,10 @@
 use std::collections::HashSet;
+use std::fmt::format;
 use proc_macro2::TokenStream;
 use syn::{ItemEnum, Error, Generics, Ident, Result, LitInt, Path};
 
 use ebml_iterable_specification::TagDataType;
+use quote::ToTokens;
 
 pub struct Enum<'a> {
     pub original: &'a ItemEnum,
@@ -51,7 +53,7 @@ impl<'a> Variant<'a> {
         for attr in &node.attrs {
             if attr.path.is_ident("id") {
                 if id_attr.is_some() {
-                    return Err(Error::new_spanned(node, "duplicate #[id] attribute"));
+                    return Err(Error::new_spanned(node, format!("duplicate {} attribute", attr.to_token_stream())));
                 }
                 let val = attr.parse_args::<LitInt>()?.base10_parse::<u64>()?;
                 id_attr = Some((val, Attribute {
@@ -60,13 +62,13 @@ impl<'a> Variant<'a> {
                 }));
             } else if attr.path.is_ident("data_type") {
                 if data_type_attr.is_some() {
-                    return Err(Error::new_spanned(node, "duplicate #[data_type] attribute"));
+                    return Err(Error::new_spanned(node, format!("duplicate {} attribute", attr.to_token_stream())));
                 }
 
-                let val = attr.parse_args::<syn::Path>().map_err(|err| Error::new(err.span(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
+                let val = attr.parse_args::<syn::Path>().map_err(|err| Error::new(err.span(), format!("{} requires `ebml_iterable::TagDataType`", attr.to_token_stream())))?;
                 let data_type_name = val.segments.iter().last();
                 if data_type_name.is_none() {
-                    return Err(Error::new_spanned(val, "#[data_type()] requires `ebml_iterable::TagDataType`"));
+                    return Err(Error::new_spanned(val, format!("{} requires `ebml_iterable::TagDataType`", attr.to_token_stream())));
                 }
                 let data_type_name = data_type_name.unwrap().ident.to_string();
                 let data_type_val = if data_type_name == "UnsignedInt" {
@@ -90,14 +92,14 @@ impl<'a> Variant<'a> {
                 }));
             } else if attr.path.is_ident("parent") {
                 if parent_attr.is_some() {
-                    return Err(Error::new_spanned(node, "duplicate #[parent()] attribute"));
+                    return Err(Error::new_spanned(node, format!("duplicate {} attribute", attr.to_token_stream())));
                 }
-                let ident = attr.parse_args::<syn::Ident>().map_err(|err| Error::new(err.span(), "#[parent()] must be Spec variant name"))?;
+                let ident = attr.parse_args::<syn::Ident>().map_err(|err| Error::new(err.span(), format!("{} must be Spec variant name", attr.to_token_stream())))?;
                 if node.ident == ident {
-                    return Err(Error::new_spanned(node, "#[parent()] cannot be self"))
+                    return Err(Error::new_spanned(node, format!("{} cannot be self",  attr.to_token_stream())))
                 }
                 // take from set to keep proper span in case of errors
-                let def = variant_names.get(&ident).ok_or_else(|| Error::new(ident.span(), "#[parent()] must be Spec variant"))?.clone();
+                let def = variant_names.get(&ident).ok_or_else(|| Error::new(ident.span(), format!("{} must be Spec variant", attr.to_token_stream())))?.clone();
                 parent_attr = Some((def, Attribute {
                     original: &attr,
                     tokens: &attr.tokens,

@@ -1,10 +1,11 @@
 use proc_macro2::TokenStream;
 use std::str::FromStr;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use syn::spanned::Spanned;
 use syn::{Attribute, ItemEnum, Result, Error, Visibility, Fields, FieldsUnnamed, Path, Ident, Variant};
-use quote::{quote, quote_spanned};
+use quote::{quote, quote_spanned, ToTokens};
 use ebml_iterable_specification::TagDataType;
+use ebml_iterable_specification::TagDataType::Master;
 use itertools::Itertools;
 
 use super::ast::Enum;
@@ -15,8 +16,8 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
     let mut used_ids = HashMap::<u64, &Variant>::new();
     for var in &input.variants {
         if let Some(original) = used_ids.insert(var.id_attr.0, var.original) {
-            let mut err = Error::new_spanned(var.original, "duplicate #[id()] detected");
-            err.combine(Error::new_spanned(original, "#[id()] already used previously"));
+            let mut err = Error::new_spanned(var.original, format!("duplicate {} detected", var.id_attr.1.original.to_token_stream()));
+            err.combine(Error::new_spanned(original, format!("{} already used previously", var.id_attr.1.original.to_token_stream())));
             return Err(err);
         }
     }
@@ -28,7 +29,7 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
         let mut id = Some(origin);
         while let Some(var) = id {
             if explored.contains_key(&var.ident) {
-                return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, "#[parent()] chain is circular")).reduce(|mut a, b| {
+                return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
                     a.combine(b);
                     a
                 }).unwrap());
@@ -37,6 +38,21 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
                 id = var.parent_attr.as_ref().map(|(id, _)| *map.get(id).unwrap())
             }
         }
+    }
+    let parents: HashMap<_, _> = map.iter().filter_map(|(_, it)| {
+        it.parent_attr.as_ref().and_then(|(ident, _)| map.get(ident).map(|var|(&var.ident, *var)))
+    }).collect();
+    if let Some(err) = parents.iter().filter_map(|(_, it)| {
+        if it.data_type_attr.0 != Master {
+            Some(Error::new_spanned(&it.original, "Parents must be of Master type"))
+        } else {
+            None
+        }
+    }).reduce(|mut a, b| {
+        a.combine(b);
+        a
+    }) {
+        return Err(err);
     }
 
     let ebml_specification_impl = get_impl(input)?;
@@ -58,8 +74,8 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
             .find(|a| a.path.is_ident("data_type"))
             .expect("#[data_type()] attribute required for variants under #[ebml_specification]");
 
-        let data_type_path = data_type_attribute.parse_args::<Path>().map_err(|err| Error::new(err.span(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
-        let data_type = get_last_path_ident(&data_type_path).ok_or(Error::new_spanned(data_type_attribute.clone(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
+        let data_type_path = data_type_attribute.parse_args::<Path>().map_err(|err| Error::new(err.span(), format!("{} requires `ebml_iterable::TagDataType`", data_type_attribute.to_token_stream())))?;
+        let data_type = get_last_path_ident(&data_type_path).ok_or_else(|| Error::new_spanned(data_type_attribute.clone(), format!("{} requires `ebml_iterable::TagDataType`", data_type_attribute.to_token_stream())))?;
 
         let data_type = if data_type == "Master" {
             let orig_ident = &original.ident;
@@ -137,6 +153,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
         .filter_map(|var| var.parent_attr.as_ref().map(|(ident, _)| (ident, var)))
         .group_by(|(ident, _)| *ident).into_iter()
         .map(|(k, g)| (k, g.map(|(_, v)|v).collect())).collect();
+
     let roots: Vec<u64> = input.variants.iter().filter_map(|it| if it.parent_attr.is_none() { Some(it.id_attr.0) } else { None }).collect();
 
     let is_child = input.variants.iter().map(|var: &crate::ast::Variant| {
