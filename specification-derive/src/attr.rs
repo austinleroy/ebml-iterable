@@ -21,37 +21,11 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
         }
     }
 
-    // detect circular hierarchy
     let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
     for origin in &input.variants {
-        let mut explored: HashMap<&Ident, &crate::ast::Variant> = HashMap::new();
-        let mut id = Some(origin);
-        while let Some(var) = id {
-            if explored.contains_key(&var.ident) {
-                return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
-                    a.combine(b);
-                    a
-                }).unwrap());
-            } else {
-                explored.insert(&var.ident, var);
-                id = var.parent_attr.as_ref().map(|(id, _)| *map.get(id).unwrap())
-            }
+        if origin.parent_attr.is_some() {
+            validate_parents(origin, &map)?;
         }
-    }
-    let parents: HashMap<_, _> = map.iter().filter_map(|(_, it)| {
-        it.parent_attr.as_ref().and_then(|(ident, _)| map.get(ident).map(|var|(&var.ident, *var)))
-    }).collect();
-    if let Some(err) = parents.iter().filter_map(|(_, it)| {
-        if it.data_type_attr.0 != Master {
-            Some(Error::new_spanned(&it.original, "Parents must be of Master type"))
-        } else {
-            None
-        }
-    }).reduce(|mut a, b| {
-        a.combine(b);
-        a
-    }) {
-        return Err(err);
     }
 
     let ebml_specification_impl = get_impl(input)?;
@@ -64,8 +38,33 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
     ))
 }
 
+// detect circular hierarchy and verify all parents are Master type elements
+fn validate_parents(origin: &crate::ast::Variant, variants_map: &HashMap<&Ident, &crate::ast::Variant>) -> Result<()> {
+    let mut explored: HashMap<&Ident, &crate::ast::Variant> = HashMap::new();
+    explored.insert(&origin.ident, origin);
+
+    let mut variant = origin;
+    while let Some(parent) = variant.parent_attr.as_ref().map(|(id, _)| *variants_map.get(id).unwrap()) {
+        if parent.data_type_attr.0 != Master {
+            return Err(Error::new_spanned(&parent.original, "Parents must be of Master type"))
+        }
+
+        if explored.contains_key(&parent.ident) {
+            return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
+                a.combine(b);
+                a
+            }).unwrap());
+        }
+
+        explored.insert(&parent.ident, parent);
+        variant = parent;
+    }
+
+    Ok(())
+}
+
 fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
-    let spanned_master_enum = spanned_master_enum(original).clone();
+    let spanned_master_enum = spanned_master_enum(original);
     for var in original.variants.iter_mut() {
         let data_type_attribute: &Attribute = var
             .attrs
@@ -93,13 +92,7 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
             return Err(Error::new_spanned(data_type_attribute.clone(), format!("unknown data_type \"{}\"", data_type)));
         };
 
-        var.attrs.retain(|a| {
-            if a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("parent") {
-                false
-            } else {
-                true
-            }
-        });
+        var.attrs.retain(|a| !(a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("parent")));
         var.fields = Fields::Unnamed(syn::parse2::<FieldsUnnamed>(data_type)?);
     }
     original.variants.push(syn::parse_str::<Variant>("RawTag(u64, ::std::vec::Vec<u8>)")?);
@@ -144,13 +137,20 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
     };
 
     let variant_map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
-    let get_parent_id = input.variants.iter().filter(|v| v.parent_attr.as_ref().is_some()).map(|var: &crate::ast::Variant| {
-        let name = &var.ident;
-        let parent = var.parent_attr.as_ref().map(|a| variant_map.get(&a.0).map(|v| v.id_attr.0)).flatten();
-
-        quote! {
-            #ty::#name(_) => Some(#parent),
+    let get_parent_id = input.variants.iter().filter_map(|v| {
+        match v.parent_attr.as_ref() {
+            None => None,
+            Some(parent) => {
+                let name = &v.ident;
+                let parent_id = variant_map.get(&parent.0).map(|v| v.id_attr.0);
+                Some(
+                    quote! {
+                        #ty::#name(_) => Some(#parent_id),
+                    }
+                )
+            }
         }
+
     });
 
     let get_unsigned_int_tag = input.variants.iter()
@@ -376,9 +376,5 @@ fn spanned_tag_data_type(input: &ItemEnum) -> TokenStream {
 
 fn get_last_path_ident(path: &Path) -> Option<&Ident> {
     let seg = path.segments.iter().last();
-    if seg.is_none() {
-        None
-    } else {
-        Some(&seg.unwrap().ident)
-    }
+    seg.map(|seg| &seg.ident)
 }

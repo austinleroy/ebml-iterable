@@ -56,7 +56,7 @@ impl<'a> Variant<'a> {
                 }
                 let val = attr.parse_args::<LitInt>()?.base10_parse::<u64>()?;
                 id_attr = Some((val, Attribute {
-                    original: &attr,
+                    original: attr,
                     tokens: &attr.tokens,
                 }));
             } else if attr.path.is_ident("data_type") {
@@ -86,7 +86,7 @@ impl<'a> Variant<'a> {
                     return Err(Error::new_spanned(val, format!("unrecognized `ebml_iterable::TagDataType` value: {}", data_type_name)));
                 };
                 data_type_attr = Some((data_type_val, val, Attribute {
-                    original: &attr,
+                    original: attr,
                     tokens: &attr.tokens,
                 }));
             } else if attr.path.is_ident("parent") {
@@ -100,7 +100,7 @@ impl<'a> Variant<'a> {
                 // take from set to keep proper span in case of errors
                 let def = variant_names.get(&ident).ok_or_else(|| Error::new(ident.span(), format!("{} must be Spec variant", attr.to_token_stream())))?.clone();
                 parent_attr = Some((def, Attribute {
-                    original: &attr,
+                    original: attr,
                     tokens: &attr.tokens,
                 }))
             }

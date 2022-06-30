@@ -5,13 +5,13 @@ use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master, TagDataTyp
 use futures::{AsyncRead, AsyncReadExt, Stream};
 use crate::error::{TagIteratorError, ToolError};
 use crate::tag_iterator_util::{EBMLSize, ProcessingTag};
-use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
+use crate::tag_iterator_util::EBMLSize::Known;
 use crate::tools;
 
 ///
-/// This Can be transformed into a [`Stream`] using [`into_stream`], or consumed directly by calling [`.next().await`] in a loop.
+/// This Can be transformed into a [`Stream`] using [`into_stream`][TagIteratorAsync::into_stream], or consumed directly by calling [`.next().await`] in a loop.
 ///
-/// The struct can be created with the [`new()`] function on any source that implements the [`futures::AsyncRead`] trait.
+/// The struct can be created with the [`new()`][TagIteratorAsync::new] function on any source that implements the [`futures::AsyncRead`] trait.
 ///
 pub struct TagIteratorAsync<R: AsyncRead + Unpin, TSpec>
     where
@@ -57,17 +57,13 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         if size < len {
             let remaining = len - size;
             self.buf.extend(repeat(0).take(remaining));
-            match self.read.read_exact(&mut self.buf[size..]).await {
-                Err(source) => {
-                    return match source.kind() {
-                        ErrorKind::UnexpectedEof => {
-                            Ok(false)
-                        }
-                        _ => Err(TagIteratorError::ReadError { source })?
+            if let Err(source) = self.read.read_exact(&mut self.buf[size..]).await {
+                return match source.kind() {
+                    ErrorKind::UnexpectedEof => {
+                        Ok(false)
                     }
-
+                    _ => Err(TagIteratorError::ReadError { source })
                 }
-                _ => {}
             }
         }
         Ok(true)
@@ -115,7 +111,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                 size,
                 start: current_offset,
             });
-            return Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)));
+            Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)))
         } else {
             let size = if let Known(size) = size {
                 size
@@ -147,25 +143,24 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                 },
             };
 
-            let previous_tag_ended = {
-                match self.tag_stack.last() {
-                    None => true,
-                    Some(previous_tag) => {
+            match self.tag_stack.last() {
+                None => Ok(tag),
+                Some(previous_tag) => {
+                    let previous_tag_ended = 
                         previous_tag.is_parent(tag_id) ||
                         previous_tag.is_sibling(&tag) ||
                         (
                             std::mem::discriminant(&tag) != std::mem::discriminant(&TSpec::get_raw_tag(tag_id, &[])) && 
                             matches!(tag.get_parent_id(), None)
-                        )
+                        );
+                        
+                    if previous_tag_ended {
+                        Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), start: current_offset }).into_inner())
+                    } else {
+                        Ok(tag)
                     }
                 }
-            };
-    
-            if previous_tag_ended {
-                Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), start: current_offset }).into_inner())
-            } else {
-                Ok(tag)
-            }
+            }    
         }
     }
 
@@ -184,11 +179,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             Err(err) => return Some(Err(err)),
             Ok(data_remaining) => {
                 if !data_remaining {
-                    return if let Some(tag) = self.tag_stack.pop() {
-                        Some(Ok(tag.into_inner()))
-                    } else {
-                        None
-                    }
+                    return self.tag_stack.pop().map(|tag| Ok(tag.into_inner()));
                 }
             }
         }

@@ -193,7 +193,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
             let raw_data = if let Known(size) = size {
                 self.read_tag_data(size)?
             } else {
-                unreachable!("Unknown size for primitive or buffered tags is not allowed")
+                return Err(TagIteratorError::CorruptedFileData("Unknown size for primitive tag not allowed".into()));
             };
 
             let tag = match spec_tag_type {
@@ -244,7 +244,6 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                     }
                 }
             }
-
         }
     }
 }

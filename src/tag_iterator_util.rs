@@ -15,11 +15,10 @@ impl From<u64> for EBMLSize {
 }
 
 impl EBMLSize {
-
     pub fn new(size: u64) -> Self {
         const UNKNOWN: u64 = u64::MAX >> 8;
         if size == UNKNOWN {
-            return Unknown
+            Unknown
         } else {
             match size.try_into() {
                 Ok(value) => Known(value),
@@ -27,7 +26,6 @@ impl EBMLSize {
             }
         }
     }
-
 }
 
 pub struct ProcessingTag<TSpec>
@@ -39,11 +37,6 @@ pub struct ProcessingTag<TSpec>
 }
 
 impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone {
-
-    pub fn get_id(&self) -> u64 {
-        self.tag.get_id()
-    }
-
     pub fn into_inner(self) -> TSpec {
         self.tag
     }

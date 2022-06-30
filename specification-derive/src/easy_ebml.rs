@@ -34,7 +34,6 @@ impl Parse for EasyEBML {
 }
 
 impl EasyEBML {
-
     pub fn implement(self) -> Result<TokenStream> {
         let EasyEBML { attrs, visibility, ident, variants } = self;
 

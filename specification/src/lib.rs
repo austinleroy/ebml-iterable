@@ -119,6 +119,11 @@ pub trait EbmlTag<T: Clone> {
     ///
     fn get_id(&self) -> u64;
 
+    ///
+    /// Gets the id of the parent of `self`, if any.
+    /// 
+    /// This function is used to find the id of the direct ancestor of the current tag.  If the current tag is a root element, this function should return `None`.
+    /// 
     fn get_parent_id(&self) -> Option<u64>;
 
     ///
