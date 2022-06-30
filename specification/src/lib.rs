@@ -119,6 +119,8 @@ pub trait EbmlTag<T: Clone> {
     ///
     fn get_id(&self) -> u64;
 
+    fn get_parent_id(&self) -> Option<u64>;
+
     ///
     /// Gets a reference to the data contained in `self` as an unsigned integer.
     ///
@@ -160,19 +162,6 @@ pub trait EbmlTag<T: Clone> {
     /// This function *must* return `None` if the associated data type of `self` is not [`TagDataType::Master`].  Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn as_master(&self) -> Option<&Master<T>>;
-
-    ///
-    /// Tests if [id] is a child of self
-    ///
-    /// Default is [true]
-    ///
-    /// Unknown or unexpected elements are children. Global elements are children.
-    ///
-    /// Used to determine if Unknown size blocks should end. If [is_child] returns false, the Unknown size block ends.
-    ///
-    /// [`Spec`](https://github.com/ietf-wg-cellar/ebml-specification/blob/master/specification.markdown#unknown-data-size) does not explicitly state what to do in case of an unexpected element, so we assume it will be handled like a child element since it is not one of the end conditions.
-    ///
-    fn is_child(&self, id: u64) -> bool;
 }
 
 ///

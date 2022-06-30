@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::mem;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag};
-use crate::tag_iterator_util::ProcessingTag::{EndTag, NextTag};
 
 use super::tools;
 use super::specs::{EbmlSpecification, EbmlTag, Master, TagDataType};
@@ -179,38 +178,24 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
         let size: EBMLSize = self.read_tag_size()?;
 
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
+        let current_offset = self.current_offset();
 
         let is_master = matches!(spec_tag_type, TagDataType::Master);
-        let is_child = self.tag_stack.last().map(|it| {
-            match it {
-                NextTag {..} => true,
-                EndTag { size, tag: parent, .. } => {
-                    // The unknown check is there to still support proper parsing of badly formatted files.
-                    *size != Unknown || parent.is_child(tag_id)
-                }
-            }
-        }).unwrap_or(true);
         if is_master && (size == Unknown || (!self.buffer_all && !self.tag_ids_to_buffer.contains(&tag_id))) {
-            let end_tag = EndTag {
+            self.tag_stack.push(ProcessingTag {
                 tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
                 size,
-                start: self.current_offset(),
-            };
-            let start_tag = TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id));
-            if is_child {
-                self.tag_stack.push(end_tag);
-                Ok(start_tag)
-            } else {
-                let tag = mem::replace(self.tag_stack.last_mut().unwrap(), end_tag).into_inner();
-                self.tag_stack.push(NextTag { tag: start_tag });
-                Ok(tag)
-            }
+                start: current_offset,
+            });
+
+            Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)))
         } else {
             let raw_data = if let Known(size) = size {
                 self.read_tag_data(size)?
             } else {
                 unreachable!("Unknown size for primitive or buffered tags is not allowed")
             };
+
             let tag = match spec_tag_type {
                 TagDataType::Master => {
                     let mut src = Cursor::new(raw_data);
@@ -240,10 +225,25 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                     TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id))
                 },
             };
-            if is_child {
-                Ok(tag)
+
+            let previous_tag_ended = {
+                match self.tag_stack.last() {
+                    None => true,
+                    Some(previous_tag) => {
+                        previous_tag.is_parent(tag_id) ||
+                        previous_tag.is_sibling(&tag) ||
+                        (
+                            std::mem::discriminant(&tag) != std::mem::discriminant(&TSpec::get_raw_tag(tag_id, &[])) && 
+                            matches!(tag.get_parent_id(), None)
+                        )
+                    }
+                }
+            };
+
+            if previous_tag_ended {
+                Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size, start: current_offset }).into_inner())
             } else {
-                Ok(mem::replace(self.tag_stack.last_mut().unwrap(), NextTag { tag }).into_inner())
+                Ok(tag)
             }
         }
     }
@@ -256,17 +256,12 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(tag) = self.tag_stack.pop() {
-            match tag {
-                EndTag { size, start, tag } => {
-                    if let Known(size) = size {
-                        if self.current_offset() >= start + size {
-                            return Some(Ok(tag));
-                        }
-                    }
-                    self.tag_stack.push(EndTag { size, start, tag });
-                },
-                NextTag { tag } => return Some(Ok(tag))
+            if let Known(size) = tag.size {
+                if self.current_offset() >= tag.start + size {
+                    return Some(Ok(tag.tag));
+                }
             }
+            self.tag_stack.push(tag);
         }
 
         if self.internal_buffer_position == self.buffered_byte_length {

@@ -72,6 +72,10 @@ impl EbmlTag<EmptySpec> for EmptySpec {
         self.id
     }
 
+    fn get_parent_id(&self) -> Option<u64> {
+        None
+    }
+
     fn as_unsigned_int(&self) -> Option<&u64> {
         None
     }
@@ -97,11 +101,5 @@ impl EbmlTag<EmptySpec> for EmptySpec {
             Some(children) => Some(children),
             None => None
         }
-    }
-
-    fn is_child(&self, id: u64) -> bool {
-        // This assumes we know there are no unknown or unexpected elements
-        // To correctly be implemented, this should know all parent, root and sibling elements and return false if it is one of them, because spec requires them to be the only stop conditions.
-        self.children.iter().any(|it|it.clone().get_children().iter().any(|it|it.id == id))
     }
 }

@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use std::str::FromStr;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::{Attribute, ItemEnum, Result, Error, Visibility, Fields, FieldsUnnamed, Path, Ident, Variant};
 use quote::{quote, quote_spanned, ToTokens};
@@ -143,43 +143,13 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
         }
     };
 
-    let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
-    let mut parents: HashMap<_, Vec<_>> = HashMap::new();
-    for var in input.variants.iter() {
-        if let Some((parent, _)) = var.parent_attr.as_ref() {
-            parents.entry(parent).or_default().push(var.id_attr.0);
-        }
-    }
-
-    let roots: Vec<u64> = input.variants.iter().filter_map(|it| if it.parent_attr.is_none() { Some(it.id_attr.0) } else { None }).collect();
-
-    let is_child = input.variants.iter().map(|var: &crate::ast::Variant| {
+    let variant_map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
+    let get_parent_id = input.variants.iter().filter(|v| v.parent_attr.as_ref().is_some()).map(|var: &crate::ast::Variant| {
         let name = &var.ident;
-        let siblings = var.parent_attr.iter().flat_map(|(ident, _)| {
-            parents.get(&ident).unwrap().iter().copied()
-        });
-        let parents = itertools::unfold(Some(var), |state| {
-            if let Some(var) = *state {
-                *state = var.parent_attr.as_ref().map(|(ident, _)| *map.get(ident).unwrap());
-                Some(var.id_attr.0)
-            } else {
-                None
-            }
-        });
-
-        let mut ids: BTreeSet<u64> = BTreeSet::new();
-        ids.extend(&roots);
-        ids.extend(parents);
-        ids.extend(siblings);
-        ids.remove(&0xBF); // Remove global CRC 32 element
-        ids.remove(&0xEC); // Remove global Void 32 element
-        let len = ids.len();
+        let parent = var.parent_attr.as_ref().map(|a| variant_map.get(&a.0).map(|v| v.id_attr.0)).flatten();
 
         quote! {
-            #ty::#name(_) => {
-                const NOT_CHILDREN: [u64;#len] = [#(#ids),*];
-                NOT_CHILDREN.binary_search(&id).is_err()
-            },
+            #ty::#name(_) => Some(#parent),
         }
     });
 
@@ -311,6 +281,13 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
                 }
             }
 
+            fn get_parent_id(&self) -> Option<u64> {
+                match self {
+                    #(#get_parent_id)*
+                    _ => None,
+                }
+            }
+
             fn as_unsigned_int(&self) -> Option<&u64> {
                 match self {
                     #(#as_unsigned_int)*
@@ -351,13 +328,6 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
                 match self {
                     #(#as_master)*
                     _ => None,
-                }
-            }
-
-            fn is_child(&self, id: u64) -> bool {
-                match self {
-                    #(#is_child)*
-                    #ty::RawTag(..) => false,
                 }
             }
         }

@@ -1,7 +1,6 @@
-use ebml_iterable_specification::{EbmlSpecification, EbmlTag};
+use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master};
 use std::convert::TryInto;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
-use crate::tag_iterator_util::ProcessingTag::{EndTag, NextTag};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EBMLSize {
@@ -31,40 +30,37 @@ impl EBMLSize {
 
 }
 
-pub enum ProcessingTag<TSpec>
+pub struct ProcessingTag<TSpec>
     where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {
-    EndTag {
-        tag: TSpec,
-        size: EBMLSize,
-        start: usize,
-    },
-    NextTag {
-        tag: TSpec,
-    }
+    pub tag: TSpec,
+    pub size: EBMLSize,
+    pub start: usize,    
 }
 
 impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone {
 
     pub fn get_id(&self) -> u64 {
-        match self {
-            EndTag { tag,.. } => tag.get_id(),
-            NextTag { tag } => tag.get_id()
-        }
+        self.tag.get_id()
     }
 
     pub fn into_inner(self) -> TSpec {
-        match self {
-            EndTag { tag,.. } => tag,
-            NextTag { tag } => tag
-        }
+        self.tag
     }
 
-    pub fn inner(&self) -> &TSpec {
-        match self {
-            EndTag { tag,.. } => tag,
-            NextTag { tag } => tag
+    pub fn is_parent(&self, id: u64) -> bool {
+        let mut parent_id_opt = self.tag.get_parent_id();
+        while let Some(parent_id) = parent_id_opt {
+            if parent_id == id {
+                return true;
+            }
+            parent_id_opt = TSpec::get_master_tag(parent_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: parent id {} type was not master!!", parent_id)).get_parent_id();
         }
+        false
+    }
+
+    pub fn is_sibling(&self, compare: &TSpec) -> bool {
+        self.tag.get_parent_id() == compare.get_parent_id()
     }
 }
 
