@@ -1,7 +1,6 @@
 use std::io::{Cursor, Read};
 use std::convert::TryInto;
 use std::collections::HashSet;
-use std::mem;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag};
 
@@ -226,43 +225,11 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                 },
             };
 
-            match self.tag_stack.last() {
-                None => Ok(tag),
-                Some(previous_tag) => {
-                    let previous_tag_ended =
-                        previous_tag.is_parent(tag_id) ||
-                        previous_tag.is_sibling(&tag) ||
-                        (
-                            std::mem::discriminant(&tag) != std::mem::discriminant(&TSpec::get_raw_tag(tag_id, &[])) && 
-                            matches!(tag.get_parent_id(), None)
-                        );
-
-                    if previous_tag_ended {
-                        Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size, start: current_offset }).into_inner())
-                    } else {
-                        Ok(tag)
-                    }
-                }
-            }
+            Ok(tag)
         }
     }
-}
 
-impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
-    where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
-{
-    type Item = Result<TSpec, TagIteratorError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(tag) = self.tag_stack.pop() {
-            if let Known(size) = tag.size {
-                if self.current_offset() >= tag.start + size {
-                    return Some(Ok(tag.tag));
-                }
-            }
-            self.tag_stack.push(tag);
-        }
-
+    fn read_tag_safe(&mut self) -> Option<Result<TSpec, TagIteratorError>> {
         if self.internal_buffer_position == self.buffered_byte_length {
             //If we've already consumed the entire internal buffer
             //ensure there is nothing else in the data source before returning `None`
@@ -282,5 +249,52 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
         }
 
         Some(self.read_tag())
+    }
+}
+
+impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
+    where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
+{
+    type Item = Result<TSpec, TagIteratorError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(open_tag) = self.tag_stack.pop() {
+            if let Known(size) = open_tag.size {
+                if self.current_offset() >= open_tag.start + size {
+                    return Some(Ok(open_tag.tag));
+                } else {
+                    self.tag_stack.push(open_tag);
+                }
+            } else {
+                // Unknown sized tags can be ended if we reach the end of a parent element with a known size
+                let parent_ended = self.tag_stack.iter().any(|p| matches!(p.size, Known(s) if self.current_offset() >= p.start + s));
+                if parent_ended {
+                    return Some(Ok(open_tag.tag));
+                }
+
+                // Unknown sized tags can be ended if we reach an element that is:
+                //  - A parent of the tag
+                //  - A direct sibling of the tag
+                //  - A Root element
+                return self.read_tag_safe().map(|res| res.map(|next_tag| {
+                    let previous_tag_ended =
+                        open_tag.is_parent(next_tag.get_id()) || // parent
+                        open_tag.is_sibling(&next_tag) || // sibling
+                        ( // Root element
+                            std::mem::discriminant(&next_tag) != std::mem::discriminant(&TSpec::get_raw_tag(next_tag.get_id(), &[])) && 
+                            matches!(next_tag.get_parent_id(), None)
+                        );
+
+                    if previous_tag_ended {
+                        self.tag_stack.push(ProcessingTag { tag: next_tag, start: 0, size: Known(0) });
+                        open_tag.tag
+                    } else {
+                        next_tag
+                    }
+                }));
+            }
+        } 
+        
+        self.read_tag_safe()
     }
 }
