@@ -226,25 +226,25 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                 },
             };
 
-            let previous_tag_ended = {
-                match self.tag_stack.last() {
-                    None => true,
-                    Some(previous_tag) => {
+            match self.tag_stack.last() {
+                None => Ok(tag),
+                Some(previous_tag) => {
+                    let previous_tag_ended =
                         previous_tag.is_parent(tag_id) ||
                         previous_tag.is_sibling(&tag) ||
                         (
                             std::mem::discriminant(&tag) != std::mem::discriminant(&TSpec::get_raw_tag(tag_id, &[])) && 
                             matches!(tag.get_parent_id(), None)
-                        )
+                        );
+
+                    if previous_tag_ended {
+                        Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size, start: current_offset }).into_inner())
+                    } else {
+                        Ok(tag)
                     }
                 }
-            };
-
-            if previous_tag_ended {
-                Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size, start: current_offset }).into_inner())
-            } else {
-                Ok(tag)
             }
+
         }
     }
 }
