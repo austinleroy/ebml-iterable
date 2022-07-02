@@ -8,22 +8,23 @@ pub enum EBMLSize {
     Unknown
 }
 
-impl From<u64> for EBMLSize {
-    fn from(size: u64) -> Self {
-        Self::new(size)
-    }
-}
-
 impl EBMLSize {
-    pub fn new(size: u64) -> Self {
-        const UNKNOWN: u64 = u64::MAX >> 8;
-        if size == UNKNOWN {
-            Unknown
-        } else {
-            match size.try_into() {
-                Ok(value) => Known(value),
-                Err(_) => Unknown
-            }
+    pub fn new(size: u64, vint_length: usize) -> Self {
+        match vint_length {
+            1 => if size == ((1 << (7))     - 1) { return Unknown; },
+            2 => if size == ((1 << (7 * 2)) - 1) { return Unknown; },
+            3 => if size == ((1 << (7 * 3)) - 1) { return Unknown; },
+            4 => if size == ((1 << (7 * 4)) - 1) { return Unknown; },
+            5 => if size == ((1 << (7 * 5)) - 1) { return Unknown; },
+            6 => if size == ((1 << (7 * 6)) - 1) { return Unknown; },
+            7 => if size == ((1 << (7 * 7)) - 1) { return Unknown; },
+            8 => if size == ((1 << (7 * 8)) - 1) { return Unknown; },
+            _ => {},
+        }
+
+        match size.try_into() {
+            Ok(value) => Known(value),
+            Err(_) => Unknown
         }
     }
 }

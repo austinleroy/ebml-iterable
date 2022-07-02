@@ -53,7 +53,7 @@ impl Vint for u16 { }
 impl Vint for u8 { }
 
 fn check_size_u64(val: u64) -> Result<(), ToolError> {
-    if val > (1 << 49) - 2 {
+    if val > (1 << 56) - 1 {
         Err(ToolError::WriteVintOverflow(val))
     } else {
         Ok(())

@@ -85,7 +85,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         match tools::read_vint(&self.buf).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
                 self.advance(length);
-                Ok(value.into())
+                Ok(EBMLSize::new(value, length))
             },
             None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag size, but reached end of source."))),
         }

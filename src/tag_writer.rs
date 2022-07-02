@@ -59,6 +59,12 @@ impl<W: Write> TagWriter<W>
         }
     }
 
+    fn private_flush(&mut self) -> Result<(), TagWriterError> {
+        self.dest.write_all(self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
+        self.dest.flush().map_err(|source| TagWriterError::WriteError { source })?;
+        Ok(())
+    }
+
     fn write_unsigned_int_tag(&mut self, id: u64, data: &u64) -> Result<(), TagWriterError> {
         self.working_buffer.extend(id.to_be_bytes().iter().skip_while(|&v| *v == 0u8));
         let data = *data;
@@ -206,10 +212,32 @@ impl<W: Write> TagWriter<W>
         }
 
         if self.open_tags.is_empty() {
-            self.dest.write_all(self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
-            self.dest.flush().map_err(|source| TagWriterError::WriteError { source })?;
+            self.private_flush()?;
         }
 
+        Ok(())
+    }
+
+    ///
+    /// Write a tag with an unknown size to this instance's destination.
+    /// 
+    /// This method allows you to start a tag that doesn't have a known size.  Useful for streaming, or when the data is expected to be too large to fit into memory.  This method can *only* be used on Master type tags.
+    /// 
+    /// ## Errors
+    /// 
+    /// This method will return an error if the input tag is not a Master type tag, as those are the only types allowed to be of unknown size.
+    /// 
+    pub fn write_unknown_size<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<(), TagWriterError> {
+        let tag_id = tag.get_id();
+        let tag_type = TSpec::get_tag_data_type(tag_id);
+        match tag_type {
+            TagDataType::Master => {},
+            _ => {
+                return Err(TagWriterError::TagSizeError(format!("Cannot write an unknown size for tag of type {:?}", tag_type)))
+            }
+        };
+        self.working_buffer.extend(tag_id.to_be_bytes().iter().skip_while(|&v| *v == 0u8));
+        self.working_buffer.extend_from_slice(&(u64::MAX >> 7).to_be_bytes());
         Ok(())
     }
 
@@ -240,11 +268,26 @@ impl<W: Write> TagWriter<W>
         self.write_binary_tag(tag_id, data)?;
         
         if self.open_tags.is_empty() {
-            self.dest.write_all(self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
-            self.dest.flush().map_err(|source| TagWriterError::WriteError { source })?;
+            self.private_flush()
+        } else {
+            Ok(())
+        }        
+    }
+
+    ///
+    /// Attempts to flush all unwritten tags to the underlying destination.
+    /// 
+    /// This method can be used to finalize any open [`Master`] type tags that have not been ended.  The writer makes an attempt to close every open tag and write all bytes to the instance's destination.
+    /// 
+    /// ## Errors
+    /// 
+    /// This method can error if there is a problem writing to the destination.
+    /// 
+    pub fn flush(&mut self) -> Result<(), TagWriterError> {
+        while let Some(id) = self.open_tags.last().map(|t| t.0) {
+            self.end_tag(id)?;
         }
-        
-        Ok(())
+        self.private_flush()
     }
 
     //TODO: panic on drop if there is an open tag that hasn't been written.  Or maybe flush stream of any open tags?

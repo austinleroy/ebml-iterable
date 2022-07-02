@@ -1,5 +1,4 @@
 use std::io::{Cursor, Read};
-use std::convert::TryInto;
 use std::collections::HashSet;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag};
@@ -156,7 +155,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
                 self.internal_buffer_position += length;
-                Ok(value.try_into().expect("u64 couldn't convert into usize"))
+                Ok(EBMLSize::new(value, length))
             },
             None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag size, but reached end of source."))),
         }
@@ -267,6 +266,7 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
                 }
             } else {
                 // Unknown sized tags can be ended if we reach the end of a parent element with a known size
+                // Todo: should this check just be removed? Doesn't seem like a realistic situation for any kind of writer
                 let parent_ended = self.tag_stack.iter().any(|p| matches!(p.size, Known(s) if self.current_offset() >= p.start + s));
                 if parent_ended {
                     return Some(Ok(open_tag.tag));

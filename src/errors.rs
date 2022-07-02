@@ -127,7 +127,9 @@ pub mod tag_writer {
         ///
         /// An error with the size of a tag.
         ///
-        /// Can occur if the tag size overflows the max value representable by a vint (`2^57 - 1`, or `144,115,188,075,855,871`).  Typically this won't happen - this variant is included for completeness.
+        /// Can occur if the tag size overflows the max value representable by a vint (`2^57 - 1`, or `144,115,188,075,855,871`).
+        /// 
+        /// This can also occur if a non-[`Master`][`crate::specs::TagDataType::Master`] tag is sent to be written with an unknown size.
         ///
         TagSizeError(String),
 
