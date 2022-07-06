@@ -29,6 +29,7 @@ impl EBMLSize {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct ProcessingTag<TSpec>
     where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {

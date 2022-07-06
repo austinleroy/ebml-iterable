@@ -1,5 +1,5 @@
 use std::io::{Cursor, Read};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag};
 
@@ -56,6 +56,7 @@ pub struct TagIterator<R: Read, TSpec>
     buffered_byte_length: usize,
     internal_buffer_position: usize,
     tag_stack: Vec<ProcessingTag<TSpec>>,
+    emission_queue: VecDeque<Result<TSpec, TagIteratorError>>,
 }
 
 impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
@@ -89,6 +90,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
             buffer_offset: None,
             internal_buffer_position: 0,
             tag_stack: Vec::new(),
+            emission_queue: VecDeque::new(),
         }
     }
 
@@ -171,7 +173,7 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
         Ok(&self.buffer[(self.internal_buffer_position-size)..self.internal_buffer_position])
     }
 
-    fn read_tag(&mut self) -> Result<TSpec, TagIteratorError> {
+    fn read_tag(&mut self) -> Result<ProcessingTag<TSpec>, TagIteratorError> {
         let tag_id = self.read_tag_id()?;
         let size: EBMLSize = self.read_tag_size()?;
 
@@ -180,13 +182,11 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
 
         let is_master = matches!(spec_tag_type, TagDataType::Master);
         if is_master && (size == Unknown || (!self.buffer_all && !self.tag_ids_to_buffer.contains(&tag_id))) {
-            self.tag_stack.push(ProcessingTag {
-                tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
+            Ok(ProcessingTag { 
+                tag: TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)), 
                 size,
                 start: current_offset,
-            });
-
-            Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)))
+            })
         } else {
             let raw_data = if let Known(size) = size {
                 self.read_tag_data(size)?
@@ -224,11 +224,11 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
                 },
             };
 
-            Ok(tag)
+            Ok(ProcessingTag { tag, size, start: current_offset })
         }
     }
 
-    fn read_tag_safe(&mut self) -> Option<Result<TSpec, TagIteratorError>> {
+    fn read_tag_checked(&mut self) -> Option<Result<ProcessingTag<TSpec>, TagIteratorError>> {
         if self.internal_buffer_position == self.buffered_byte_length {
             //If we've already consumed the entire internal buffer
             //ensure there is nothing else in the data source before returning `None`
@@ -249,6 +249,57 @@ impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
 
         Some(self.read_tag())
     }
+
+    fn read_next(&mut self) {
+        //If we have reached the known end of any open master tags, queue that tag and all children to emit ends
+        if let Some(index) = self.tag_stack.iter().position(|tag| {
+            match tag.size {
+                Unknown => false,
+                Known(size) => self.current_offset() >= tag.start + size
+            }
+        }) {
+            self.emission_queue.extend(self.tag_stack.drain(index..).map(|t| Ok(t.tag)).rev());
+        }
+
+        if let Some(next_read) = self.read_tag_checked() {
+            if let Ok(next_tag) = &next_read {
+                while matches!(self.tag_stack.last(), Some(open_tag) if open_tag.size == Unknown) {
+                    // Unknown sized tags can be ended if we reach an element that is:
+                    //  - A parent of the tag
+                    //  - A direct sibling of the tag
+                    //  - A Root element
+                    let open_tag = self.tag_stack.last().unwrap();
+                    let previous_tag_ended =
+                        open_tag.is_parent(next_tag.tag.get_id()) || // parent
+                        open_tag.is_sibling(&next_tag.tag) || // sibling
+                        ( // Root element
+                            std::mem::discriminant(&next_tag.tag) != std::mem::discriminant(&TSpec::get_raw_tag(next_tag.tag.get_id(), &[])) && 
+                            matches!(next_tag.tag.get_parent_id(), None)
+                        );
+        
+                    if previous_tag_ended {
+                        self.emission_queue.push_back(Ok(self.tag_stack.pop().unwrap().tag));
+                    } else {
+                        break;
+                    }
+                }
+
+                if let Some(Master::Start) = next_tag.tag.as_master() {
+                    self.tag_stack.push(ProcessingTag {
+                        tag: TSpec::get_master_tag(next_tag.tag.get_id(), Master::End).unwrap(),
+                        size: next_tag.size,
+                        start: next_tag.start,
+                    });
+                }
+            }
+
+            self.emission_queue.push_back(next_read.map(|r| r.tag));
+        } else {
+            while let Some(tag) = self.tag_stack.pop() {
+                self.emission_queue.push_back(Ok(tag.tag));
+            }
+        }
+    }
 }
 
 impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
@@ -257,44 +308,9 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
     type Item = Result<TSpec, TagIteratorError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(open_tag) = self.tag_stack.pop() {
-            if let Known(size) = open_tag.size {
-                if self.current_offset() >= open_tag.start + size {
-                    return Some(Ok(open_tag.tag));
-                } else {
-                    self.tag_stack.push(open_tag);
-                }
-            } else {
-                // Unknown sized tags can be ended if we reach the end of a parent element with a known size
-                // Todo: should this check just be removed? Doesn't seem like a realistic situation for any kind of writer
-                let parent_ended = self.tag_stack.iter().any(|p| matches!(p.size, Known(s) if self.current_offset() >= p.start + s));
-                if parent_ended {
-                    return Some(Ok(open_tag.tag));
-                }
-
-                // Unknown sized tags can be ended if we reach an element that is:
-                //  - A parent of the tag
-                //  - A direct sibling of the tag
-                //  - A Root element
-                return self.read_tag_safe().map(|res| res.map(|next_tag| {
-                    let previous_tag_ended =
-                        open_tag.is_parent(next_tag.get_id()) || // parent
-                        open_tag.is_sibling(&next_tag) || // sibling
-                        ( // Root element
-                            std::mem::discriminant(&next_tag) != std::mem::discriminant(&TSpec::get_raw_tag(next_tag.get_id(), &[])) && 
-                            matches!(next_tag.get_parent_id(), None)
-                        );
-
-                    if previous_tag_ended {
-                        self.tag_stack.push(ProcessingTag { tag: next_tag, start: 0, size: Known(0) });
-                        open_tag.tag
-                    } else {
-                        next_tag
-                    }
-                }));
-            }
-        } 
-        
-        self.read_tag_safe()
+        if self.emission_queue.is_empty() {
+            self.read_next();
+        }
+        self.emission_queue.pop_front()
     }
 }

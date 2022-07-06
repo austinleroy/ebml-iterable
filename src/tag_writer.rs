@@ -61,8 +61,7 @@ impl<W: Write> TagWriter<W>
 
     fn private_flush(&mut self) -> Result<(), TagWriterError> {
         self.dest.write_all(self.working_buffer.drain(..).as_slice()).map_err(|source| TagWriterError::WriteError { source })?;
-        self.dest.flush().map_err(|source| TagWriterError::WriteError { source })?;
-        Ok(())
+        self.dest.flush().map_err(|source| TagWriterError::WriteError { source })
     }
 
     fn write_unsigned_int_tag(&mut self, id: u64, data: &u64) -> Result<(), TagWriterError> {
@@ -212,10 +211,10 @@ impl<W: Write> TagWriter<W>
         }
 
         if self.open_tags.is_empty() {
-            self.private_flush()?;
+            self.private_flush()
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     ///
