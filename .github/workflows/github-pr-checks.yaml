@@ -14,11 +14,11 @@ jobs:
       - name: Set directory
         run: cd ${{ github.workspace }}/specification
       - name: Verify code compiles
-        run: cargo build
+        run: cargo build -- -D warnings
       - name: Verify tests complete
-        run: cargo test
+        run: cargo test -- -D warnings
       - name: Verify code style
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
   Verify-specification-derive:
     runs-on: ubuntu-latest
     steps:
@@ -32,11 +32,11 @@ jobs:
       - name: Set directory
         run: cd ${{ github.workspace }}/specification-derive
       - name: Verify code compiles
-        run: cargo build
+        run: cargo build -- -D warnings
       - name: Verify tests complete
-        run: cargo test
+        run: cargo test -- -D warnings
       - name: Verify code style
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
   Verify-main-package:
     runs-on: ubuntu-latest
     steps:
@@ -50,8 +50,8 @@ jobs:
       - name: Set directory
         run: cd ${{ github.workspace }}
       - name: Verify code compiles
-        run: cargo build
+        run: cargo build -- -D warnings
       - name: Verify tests complete
-        run: cargo test
+        run: cargo test -- -D warnings
       - name: Verify code style
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
