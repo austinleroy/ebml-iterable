@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::convert::{TryInto, TryFrom};
 
+use super::tag_iterator_util::EBMLSize::{self, Known, Unknown};
+
 use super::tools::Vint;
 use super::specs::{EbmlSpecification, EbmlTag, TagDataType, Master};
 
@@ -15,7 +17,7 @@ use super::errors::tag_writer::TagWriterError;
 pub struct TagWriter<W: Write>
 {
     dest: W,
-    open_tags: Vec<(u64, usize)>,
+    open_tags: Vec<(u64, EBMLSize)>,
     working_buffer: Vec<u8>,
 }
 
@@ -35,21 +37,23 @@ impl<W: Write> TagWriter<W>
     }
 
     fn start_tag(&mut self, id: u64) {
-        self.open_tags.push((id, self.working_buffer.len()));
+        self.open_tags.push((id, Known(self.working_buffer.len())));
     }
 
     fn end_tag(&mut self, id: u64) -> Result<(), TagWriterError> {
         match self.open_tags.pop() {
             Some(open_tag) => {
                 if open_tag.0 == id {
-                    let size: u64 = self.working_buffer.len()
-                        .checked_sub(open_tag.1).expect("overflow subtracting tag size from working buffer length")
-                        .try_into().expect("couldn't convert usize to u64");
-
-                    let size_vint = size.as_vint()
-                        .map_err(|e| TagWriterError::TagSizeError(e.to_string()))?;
-
-                    self.working_buffer.splice(open_tag.1..open_tag.1, open_tag.0.to_be_bytes().iter().skip_while(|&v| *v == 0u8).chain(size_vint.iter()).copied());
+                    if let Known(start) = open_tag.1 {
+                        let size: u64 = self.working_buffer.len()
+                            .checked_sub(start).expect("overflow subtracting tag size from working buffer length")
+                            .try_into().expect("couldn't convert usize to u64");
+    
+                        let size_vint = size.as_vint()
+                            .map_err(|e| TagWriterError::TagSizeError(e.to_string()))?;
+    
+                        self.working_buffer.splice(start..start, open_tag.0.to_be_bytes().iter().skip_while(|&v| *v == 0u8).chain(size_vint.iter()).copied());
+                    }
                     Ok(())
                 } else {
                     Err(TagWriterError::UnexpectedClosingTag { tag_id: id, expected_id: Some(open_tag.0) })
@@ -210,7 +214,7 @@ impl<W: Write> TagWriter<W>
             }
         }
 
-        if self.open_tags.is_empty() {
+        if !self.open_tags.iter().any(|t| matches!(t.1, Known(_))) {
             self.private_flush()
         } else {
             Ok(())
@@ -237,6 +241,7 @@ impl<W: Write> TagWriter<W>
         };
         self.working_buffer.extend(tag_id.to_be_bytes().iter().skip_while(|&v| *v == 0u8));
         self.working_buffer.extend_from_slice(&(u64::MAX >> 7).to_be_bytes());
+        self.open_tags.push((tag_id, Unknown));
         Ok(())
     }
 
@@ -266,7 +271,7 @@ impl<W: Write> TagWriter<W>
     pub fn write_raw(&mut self, tag_id: u64, data: &[u8]) -> Result<(), TagWriterError> {
         self.write_binary_tag(tag_id, data)?;
         
-        if self.open_tags.is_empty() {
+        if !self.open_tags.iter().any(|t| matches!(t.1, Known(_))) {
             self.private_flush()
         } else {
             Ok(())

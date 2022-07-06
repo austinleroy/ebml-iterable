@@ -1,44 +1,11 @@
-#[cfg(feature = "derive-spec")]
+mod test_spec;
+
 pub mod spec_write_read {
-    use ebml_iterable::specs::{ebml_specification, TagDataType, Master};
+    use ebml_iterable::specs::{Master, EbmlTag};
     use ebml_iterable::{TagIterator, TagWriter};
     use std::io::Cursor;
-        
-    #[ebml_specification]
-    #[derive(Clone, Debug, PartialEq)]
-    pub enum TestSpec {
-        #[id(0x1a45dfa3)] 
-        #[data_type(TagDataType::Master)]
-        Ebml,
 
-        #[id(0x18538067)]
-        #[data_type(TagDataType::Master)]
-        Segment,
-
-        #[id(0x1F43B675)]
-        #[data_type(TagDataType::Master)]
-        Cluster,
-
-        #[id(0x97)] 
-        #[data_type(TagDataType::UnsignedInt)]
-        CueRefCluster,
-
-        #[id(0x4100)]
-        #[data_type(TagDataType::UnsignedInt)]
-        Count,
-
-        #[id(0x83)] 
-        #[data_type(TagDataType::UnsignedInt)]
-        TrackType,
-
-        #[id(0xa1)]
-        #[data_type(TagDataType::Binary)]
-        Block,
-
-        #[id(0xa3)] 
-        #[data_type(TagDataType::Binary)]
-        SimpleBlock,
-    }
+    use super::test_spec::TestSpec;
 
     #[test]
     pub fn simple_read_write() {
@@ -117,5 +84,73 @@ pub mod spec_write_read {
 
         let tags: Vec<_> = iter.into_iter().collect();
         assert_eq!(tags.len(), 4+2, "Reading every tag that was written");
+    }
+
+    #[test]
+    pub fn write_unknown_size() {
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        writer.write(&TestSpec::Root(Master::Start)).unwrap();
+        writer.write_unknown_size(&TestSpec::Parent(Master::Start)).unwrap();
+        writer.write(&TestSpec::Child(1)).unwrap();
+        writer.write(&TestSpec::Child(2)).unwrap();
+        writer.write(&TestSpec::Parent(Master::End)).unwrap();
+        writer.write(&TestSpec::Root(Master::End)).unwrap();
+
+        dest.set_position(0);
+        
+        let iter = TagIterator::<_, TestSpec>::new(dest, &[]);
+        let tags: Vec<_> = iter.into_iter().collect();
+        assert_eq!(tags.len(), 6, "Reading every tag that was written");
+    }
+
+    #[test]
+    pub fn buffer_unknown_size() {
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        writer.write(&TestSpec::Root(Master::Start)).unwrap();
+        writer.write_unknown_size(&TestSpec::Parent(Master::Start)).unwrap();
+        writer.write(&TestSpec::Child(1)).unwrap();
+        writer.write(&TestSpec::Child(2)).unwrap();
+        writer.write(&TestSpec::Parent(Master::End)).unwrap();
+        writer.write(&TestSpec::Root(Master::End)).unwrap();
+
+        dest.set_position(0);
+        
+        let iter = TagIterator::<_, TestSpec>::new(dest, &[TestSpec::Parent(Master::Start)]);
+        let mut tags: Vec<_> = iter.into_iter().collect();
+        assert_eq!(tags.len(), 3, "Buffering 'Parent' into full variant");
+        
+        tags.pop();
+        let parent = tags.pop().unwrap().unwrap();
+        assert!(matches!(parent.as_master(), Some(Master::Full(c)) if c.len() == 2), "Did not buffer tag as master with 2 children");
+    }
+
+    #[test]
+    pub fn unknown_size_write_read() {
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        writer.write(&TestSpec::Root(Master::Start)).unwrap();
+        writer.write_unknown_size(&TestSpec::Parent(Master::Start)).unwrap();
+        writer.write(&TestSpec::Child(1)).unwrap();
+        writer.write(&TestSpec::Child(2)).unwrap();
+        writer.write(&TestSpec::Parent(Master::End)).unwrap();
+        writer.write(&TestSpec::Int(2)).unwrap();
+        writer.write(&TestSpec::Root(Master::End)).unwrap();
+
+        dest.set_position(0);
+        
+        let mut iter = TagIterator::<_, TestSpec>::new(dest, &[]);
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Root(Master::Start)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Parent(Master::Start)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Child(1)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Child(2)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Parent(Master::End)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Int(2)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Root(Master::End)))));
+        assert!(matches!(iter.next(), None));
     }
 }

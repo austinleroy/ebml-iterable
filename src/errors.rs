@@ -96,7 +96,7 @@ pub mod tag_iterator {
                 TagIteratorError::CorruptedTagData {
                     tag_id,
                     problem,
-                } => write!(f, "Error reading data for tag id ({}). {}", tag_id, problem),
+                } => write!(f, "Error reading data for tag id (0x{:x?}). {}", tag_id, problem),
                 TagIteratorError::ReadError { source: _ } => write!(f, "Error reading from source."),
             }
         }
@@ -164,8 +164,8 @@ pub mod tag_writer {
             match self {
                 TagWriterError::TagSizeError(message) => write!(f, "Problem writing data tag size. {}", message),
                 TagWriterError::UnexpectedClosingTag { tag_id, expected_id } => match expected_id {
-                    Some(expected) => write!(f, "Unexpected closing tag '{}'. Expected '{}'", tag_id, expected),
-                    None => write!(f, "Unexpected closing tag '{}'", tag_id),
+                    Some(expected) => write!(f, "Unexpected closing tag 0x'{:x?}'. Expected 0x'{:x?}'", tag_id, expected),
+                    None => write!(f, "Unexpected closing tag 0x'{:x?}'", tag_id),
                 },
                 TagWriterError::WriteError { source: _ } => write!(f, "Error writing to destination."),
             }
