@@ -9,7 +9,7 @@ jobs:
       - name: Install rust tooling
         uses: actions-rs/toolchain@v1.0.6
         with:
-          toolchain: x86_64-unknown-linux-gnu
+          toolchain: stable
           components: clippy
       - name: Set directory
         run: cd ${{ github.workspace }}/specification
@@ -27,7 +27,7 @@ jobs:
       - name: Install rust tooling
         uses: actions-rs/toolchain@v1.0.6
         with:
-          toolchain: x86_64-unknown-linux-gnu
+          toolchain: stable
           components: clippy
       - name: Set directory
         run: cd ${{ github.workspace }}/specification-derive
@@ -45,7 +45,7 @@ jobs:
       - name: Install rust tooling
         uses: actions-rs/toolchain@v1.0.6
         with:
-          toolchain: x86_64-unknown-linux-gnu
+          toolchain: stable
           components: clippy
       - name: Set directory
         run: cd ${{ github.workspace }}
