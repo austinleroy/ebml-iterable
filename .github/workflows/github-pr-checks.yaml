@@ -16,7 +16,7 @@ jobs:
       - name: Verify code compiles
         run: cargo build
       - name: Verify tests complete
-        run: "cargo test -- -D warnings"
+        run: cargo test
       - name: Verify code style
         run: "cargo clippy -- -D warnings"
   Verify-specification-derive:
@@ -34,7 +34,7 @@ jobs:
       - name: Verify code compiles
         run: cargo build
       - name: Verify tests complete
-        run: "cargo test -- -D warnings"
+        run: cargo test
       - name: Verify code style
         run: "cargo clippy -- -D warnings"
   Verify-main-package:
@@ -52,6 +52,6 @@ jobs:
       - name: Verify code compiles
         run: cargo build
       - name: Verify tests complete
-        run: "cargo test -- -D warnings"
+        run: cargo test
       - name: Verify code style
         run: "cargo clippy -- -D warnings"
