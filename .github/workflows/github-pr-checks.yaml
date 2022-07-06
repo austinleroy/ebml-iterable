@@ -1,16 +1,54 @@
-name: GitHub Actions Demo
+name: Pull Request Checks
 on: [push]
 jobs:
-  Explore-GitHub-Actions:
+  Verify-specification:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
       - name: Pull latest code files
         uses: actions/checkout@v3
       - name: Install rust tooling
         uses: actions-rs/toolchain@v1.0.6
         with:
+          toolchain: x86_64-unknown-linux-gnu
           components: clippy
+      - name: Set directory
+        run: cd ${{ github.workspace }}/specification
+      - name: Verify code compiles
+        run: cargo build
+      - name: Verify tests complete
+        run: cargo test
+      - name: Verify code style
+        run: cargo clippy
+  Verify-specification-derive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull latest code files
+        uses: actions/checkout@v3
+      - name: Install rust tooling
+        uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: x86_64-unknown-linux-gnu
+          components: clippy
+      - name: Set directory
+        run: cd ${{ github.workspace }}/specification-derive
+      - name: Verify code compiles
+        run: cargo build
+      - name: Verify tests complete
+        run: cargo test
+      - name: Verify code style
+        run: cargo clippy
+  Verify-main-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull latest code files
+        uses: actions/checkout@v3
+      - name: Install rust tooling
+        uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: x86_64-unknown-linux-gnu
+          components: clippy
+      - name: Set directory
+        run: cd ${{ github.workspace }}
       - name: Verify code compiles
         run: cargo build
       - name: Verify tests complete
