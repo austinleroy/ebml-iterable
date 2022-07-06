@@ -3,8 +3,9 @@ use std::str::FromStr;
 use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::{Attribute, ItemEnum, Result, Error, Visibility, Fields, FieldsUnnamed, Path, Ident, Variant};
-use quote::{quote, quote_spanned};
+use quote::{quote, quote_spanned, ToTokens};
 use ebml_iterable_specification::TagDataType;
+use ebml_iterable_specification::TagDataType::Master;
 
 use super::ast::Enum;
 
@@ -14,10 +15,17 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
     let mut used_ids = HashMap::<u64, &Variant>::new();
     for var in &input.variants {
         if let Some(original) = used_ids.insert(var.id_attr.0, var.original) {
-            let mut err = Error::new_spanned(var.original, "duplicate #[id()] detected");
-            err.combine(Error::new_spanned(original, "#[id()] already used previously"));
+            let mut err = Error::new_spanned(var.original, format!("duplicate {} detected", var.id_attr.1.original.to_token_stream()));
+            err.combine(Error::new_spanned(original, format!("{} already used previously", var.id_attr.1.original.to_token_stream())));
             return Err(err);
-        } 
+        }
+    }
+
+    let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
+    for origin in &input.variants {
+        if origin.parent_attr.is_some() {
+            validate_parents(origin, &map)?;
+        }
     }
 
     let ebml_specification_impl = get_impl(input)?;
@@ -30,18 +38,43 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
     ))
 }
 
+// detect circular hierarchy and verify all parents are Master type elements
+fn validate_parents(origin: &crate::ast::Variant, variants_map: &HashMap<&Ident, &crate::ast::Variant>) -> Result<()> {
+    let mut explored: HashMap<&Ident, &crate::ast::Variant> = HashMap::new();
+    explored.insert(&origin.ident, origin);
+
+    let mut variant = origin;
+    while let Some(parent) = variant.parent_attr.as_ref().map(|(id, _)| *variants_map.get(id).unwrap()) {
+        if parent.data_type_attr.0 != Master {
+            return Err(Error::new_spanned(&parent.original, "Parents must be of Master type"))
+        }
+
+        if explored.contains_key(&parent.ident) {
+            return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
+                a.combine(b);
+                a
+            }).unwrap());
+        }
+
+        explored.insert(&parent.ident, parent);
+        variant = parent;
+    }
+
+    Ok(())
+}
+
 fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
-    let spanned_master_enum = spanned_master_enum(original).clone();
+    let spanned_master_enum = spanned_master_enum(original);
     for var in original.variants.iter_mut() {
         let data_type_attribute: &Attribute = var
             .attrs
             .iter()
             .find(|a| a.path.is_ident("data_type"))
             .expect("#[data_type()] attribute required for variants under #[ebml_specification]");
-            
-        let data_type_path = data_type_attribute.parse_args::<Path>().map_err(|err| Error::new(err.span(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
-        let data_type = get_last_path_ident(&data_type_path).ok_or(Error::new_spanned(data_type_attribute.clone(), "#[data_type()] requires `ebml_iterable::TagDataType`"))?;
-        
+
+        let data_type_path = data_type_attribute.parse_args::<Path>().map_err(|err| Error::new(err.span(), format!("{} requires `ebml_iterable::TagDataType`", data_type_attribute.to_token_stream())))?;
+        let data_type = get_last_path_ident(&data_type_path).ok_or_else(|| Error::new_spanned(data_type_attribute.clone(), format!("{} requires `ebml_iterable::TagDataType`", data_type_attribute.to_token_stream())))?;
+
         let data_type = if data_type == "Master" {
             let orig_ident = &original.ident;
             quote!( (#spanned_master_enum<#orig_ident>) )
@@ -59,13 +92,7 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
             return Err(Error::new_spanned(data_type_attribute.clone(), format!("unknown data_type \"{}\"", data_type)));
         };
 
-        var.attrs.retain(|a| {
-            if a.path.is_ident("id") || a.path.is_ident("data_type") {
-                false
-            } else {
-                true
-            }
-        });
+        var.attrs.retain(|a| !(a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("parent")));
         var.fields = Fields::Unnamed(syn::parse2::<FieldsUnnamed>(data_type)?);
     }
     original.variants.push(syn::parse_str::<Variant>("RawTag(u64, ::std::vec::Vec<u8>)")?);
@@ -84,9 +111,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let data_type = &var.data_type_attr.1;
 
             quote! {
-                if id == #id {
-                    #data_type
-                }
+                #id => #data_type,
             }
         });
 
@@ -104,14 +129,29 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let name = &var.ident;
             let id = &var.id_attr.0;
             let ret_val = TokenStream::from_str(&ret_val).expect("Misuse of get_tag function in ebml_iterable_specification_derive_attr");
-    
+
             quote! {
-                if id == #id {
-                    Some(#ty::#name(#ret_val))
-                }
+                #id => Some(#ty::#name(#ret_val)),
             }
         }
     };
+
+    let variant_map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
+    let get_parent_id = input.variants.iter().filter_map(|v| {
+        match v.parent_attr.as_ref() {
+            None => None,
+            Some(parent) => {
+                let name = &v.ident;
+                let parent_id = variant_map.get(&parent.0).map(|v| v.id_attr.0);
+                Some(
+                    quote! {
+                        #ty::#name(_) => Some(#parent_id),
+                    }
+                )
+            }
+        }
+
+    });
 
     let get_unsigned_int_tag = input.variants.iter()
         .filter(|v| matches!(&v.data_type_attr.0, TagDataType::UnsignedInt))
@@ -174,47 +214,56 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
     let ebml_tag_trait = spanned_ebml_tag_trait(input.original);
     let tag_data_type = spanned_tag_data_type(input.original);
 
-    Ok(quote! {        
+    Ok(quote! {
         impl #impl_generics #ebml_spec_trait <#ty> for #ty #ty_generics #where_clause {
             fn get_tag_data_type(id: u64) -> #tag_data_type {
-                #(#get_tag_data_type else)* {
-                    #tag_data_type::Binary
+                match id {
+                    #(#get_tag_data_type)*
+                    _ => {
+                        #tag_data_type::Binary
+                    }
                 }
             }
 
             fn get_unsigned_int_tag(id: u64, data: u64) -> Option<#ty> {
-                #(#get_unsigned_int_tag else)* {
-                    None
+                match id {
+                    #(#get_unsigned_int_tag)*
+                    _ => None
                 }
             }
 
             fn get_signed_int_tag(id: u64, data: i64) -> Option<#ty> {
-                #(#get_signed_int_tag else)* {
-                    None
+                match id {
+                    #(#get_signed_int_tag)*
+                    _ => None
                 }
             }
 
             fn get_utf8_tag(id: u64, data: String) -> Option<#ty> {
-                #(#get_utf8_tag else)* {
-                    None
+                match id {
+                    #(#get_utf8_tag)*
+                    _ => None
                 }
             }
 
             fn get_binary_tag(id: u64, data: &[u8]) -> Option<#ty> {
-                #(#get_binary_tag else)* {
-                    None
+                match id {
+                    #(#get_binary_tag)*
+                    _ => None
                 }
             }
 
             fn get_float_tag(id: u64, data: f64) -> Option<#ty> {
-                #(#get_float_tag else)* {
-                    None
+                match id {
+                    #(#get_float_tag)*
+                    _ => None
                 }
             }
 
             fn get_master_tag(id: u64, data: #spanned_master_enum<#ty>) -> Option<#ty> {
-                #(#get_master_tag else)* {
-                    None
+                match id {
+                    #(#get_master_tag)*
+                    _ => None
                 }
             }
 
@@ -229,6 +278,13 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
                 match self {
                     #(#get_id)*
                     #ty::RawTag(id, _data) => *id,
+                }
+            }
+
+            fn get_parent_id(&self) -> Option<u64> {
+                match self {
+                    #(#get_parent_id)*
+                    _ => None,
                 }
             }
 
@@ -320,9 +376,5 @@ fn spanned_tag_data_type(input: &ItemEnum) -> TokenStream {
 
 fn get_last_path_ident(path: &Path) -> Option<&Ident> {
     let seg = path.segments.iter().last();
-    if seg.is_none() {
-        None
-    } else {
-        Some(&seg.unwrap().ident)
-    }
+    seg.map(|seg| &seg.ident)
 }

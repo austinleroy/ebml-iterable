@@ -72,6 +72,10 @@ impl EbmlTag<EmptySpec> for EmptySpec {
         self.id
     }
 
+    fn get_parent_id(&self) -> Option<u64> {
+        None
+    }
+
     fn as_unsigned_int(&self) -> Option<&u64> {
         None
     }

@@ -4,11 +4,9 @@ binary version of XML. It's used for container formats like [WebM][webm] or
 
 > IMPORTANT: The iterator contained in this crate is spec-agnostic and requires a specification implementing the `EbmlSpecification` and `EbmlTag` traits to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like [webm-iterable][webm-iterable].
 
-> KNOWN LIMITATION: This library was not built to work with an "Unknown Data Size" as defined in [RFC8794][rfc8794]. As such, it likely will not support streaming applications and will only work on complete datasets.
-
 ```Cargo.toml
 [dependencies]
-ebml-iterable = "0.3.2"
+ebml-iterable = "0.4.0"
 ```
 
 # Usage
@@ -66,7 +64,7 @@ There is currently only one optional feature in this crate, but that may change 
 
 # State of this project
 
-Parsing and writing complete files should both work.  Streaming isn't supported yet, but may be an option in the future. If something is broken, please create [an issue][new-issue].
+Parsing and writing complete files should both work.  Streaming (using tags of unknown size) should now also be supported, as of version 0.4.0. If something is broken, please create [an issue][new-issue].
 
 Any additional feature requests can also be submitted as [an issue][new-issue].
 

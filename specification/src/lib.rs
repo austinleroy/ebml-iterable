@@ -1,5 +1,5 @@
 //! This crate provides a core ebml specification that is used by the ebml-iterable crate.
-//! 
+//!
 //! The related ebml-iterable-specification-derive crate can be used to simplify implementation of this spec.
 //!
 
@@ -10,11 +10,11 @@ pub mod empty_spec;
 
 ///
 /// Different data types defined in the EBML specification.
-/// 
-/// # Notes 
+///
+/// # Notes
 ///
 /// This library made a concious decision to not work with "Date" elements from EBML due to lack of built-in support for dates in Rust. Specification implementations should treat Date elements as Binary so that consumers have the option of parsing the unaltered data using their library of choice, if needed.
-/// 
+///
 
 // Possible future feature flag to enable Date functionality by having `chrono` as an optional dependency?
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -29,7 +29,7 @@ pub enum TagDataType {
 
 ///
 /// This trait, along with [`EbmlTag`], should be implemented to define a specification so that EBML can be parsed correctly.  Typically implemented on an Enum of tag variants.
-/// 
+///
 /// Any specification using EBML can take advantage of this library to parse or write binary data.  As stated in the docs, [`TagWriter`](https://docs.rs/ebml-iterable/latest/ebml_iterable/struct.TagWriter.html) needs nothing special if you stick with the `write_raw` method, but [`TagIterator`](https://docs.rs/ebml-iterable/latest/ebml_iterable/struct.TagIterator.html) requires a struct implementing this trait.  Custom specification implementations can refer to [webm-iterable](https://crates.io/crates/webm_iterable) as an example.
 ///
 /// This trait and [`EbmlTag`] are typically implemented simultaneously.  They are separate traits as they have primarily different uses - [`EbmlSpecification`] should be brought into scope when dealing with the specification as a whole, whereas [`EbmlTag`] should be brought into scope when dealing with specific tags.
@@ -42,7 +42,7 @@ pub trait EbmlSpecification<T: EbmlSpecification<T> + EbmlTag<T> + Clone> {
     /// This function *must* return [`TagDataType::Binary`] if the input id is not in the specification.  Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_tag_data_type(id: u64) -> TagDataType;
-    
+
     ///
     /// Gets the id of a specific tag variant.
     ///
@@ -51,60 +51,61 @@ pub trait EbmlSpecification<T: EbmlSpecification<T> + EbmlTag<T> + Clone> {
     fn get_tag_id(item: &T) -> u64 {
         item.get_id()
     }
-    
+
     ///
-    /// Creates an unsigned integer type tag from the spec.  
+    /// Creates an unsigned integer type tag from the spec.
     ///
     /// This function *must* return `None` if the input id is not in the specification or if the input id data type is not [`TagDataType::UnsignedInt`]. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_unsigned_int_tag(id: u64, data: u64) -> Option<T>;
-    
+
     ///
-    /// Creates a signed integer type tag from the spec.  
+    /// Creates a signed integer type tag from the spec.
     ///
     /// This function *must* return `None` if the input id is not in the specification or if the input id data type is not [`TagDataType::Integer`]. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_signed_int_tag(id: u64, data: i64) -> Option<T>;
-    
+
     ///
-    /// Creates a utf8 type tag from the spec.  
+    /// Creates a utf8 type tag from the spec.
     ///
     /// This function *must* return `None` if the input id is not in the specification or if the input id data type is not [`TagDataType::Utf8`]. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_utf8_tag(id: u64, data: String) -> Option<T>;
-    
+
     ///
-    /// Creates a binary type tag from the spec.  
+    /// Creates a binary type tag from the spec.
     ///
     /// This function *must* return `None` if the input id is not in the specification or if the input id data type is not [`TagDataType::Binary`]. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_binary_tag(id: u64, data: &[u8]) -> Option<T>;
-    
+
     ///
-    /// Creates a float type tag from the spec.  
+    /// Creates a float type tag from the spec.
     ///
     /// This function *must* return `None` if the input id is not in the specification or if the input id data type is not [`TagDataType::Float`]. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_float_tag(id: u64, data: f64) -> Option<T>;
-    
+
     ///
-    /// Creates a master type tag from the spec.  
+    /// Creates a master type tag from the spec.
     ///
     /// This function *must* return `None` if the input id is not in the specification or if the input id data type is not [`TagDataType::Master`]. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_master_tag(id: u64, data: Master<T>) -> Option<T>;
 
     ///
-    /// Creates a tag that does not conform to the spec. 
+    /// Creates a tag that does not conform to the spec.
     ///
     /// This function should return a "RawTag" variant that contains the tag id and tag data.  Tag data should only be retrievable as binary data. Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_raw_tag(id: u64, data: &[u8]) -> T;
+
 }
 
 ///
 /// This trait, along with [`EbmlSpecification`], should be implemented to define a specification so that EBML can be parsed correctly.  Typically implemented on an Enum of tag variants.
-/// 
+///
 /// Any specification using EBML can take advantage of this library to parse or write binary data.  As stated in the docs, [`TagWriter`](https://docs.rs/ebml-iterable/latest/ebml_iterable/struct.TagWriter.html) needs nothing special if you stick with the `write_raw` method, but [`TagIterator`](https://docs.rs/ebml-iterable/latest/ebml_iterable/struct.TagIterator.html) requires a struct implementing this trait.  Custom specification implementations can refer to [webm-iterable](https://crates.io/crates/webm_iterable) as an example.
 ///
 /// This trait and [`EbmlSpecification`] are typically implemented simultaneously.  They are separate traits as they have primarily different uses - [`EbmlSpecification`] should be brought into scope when dealing with the specification as a whole, whereas [`EbmlTag`] should be brought into scope when dealing with specific tags.
@@ -117,6 +118,13 @@ pub trait EbmlTag<T: Clone> {
     /// Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_id(&self) -> u64;
+
+    ///
+    /// Gets the id of the parent of `self`, if any.
+    /// 
+    /// This function is used to find the id of the direct ancestor of the current tag.  If the current tag is a root element, this function should return `None`.
+    /// 
+    fn get_parent_id(&self) -> Option<u64>;
 
     ///
     /// Gets a reference to the data contained in `self` as an unsigned integer.
