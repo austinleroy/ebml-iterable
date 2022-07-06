@@ -14,7 +14,7 @@ jobs:
       - name: Set directory
         run: cd ${{ github.workspace }}/specification
       - name: Verify code compiles
-        run: "cargo build -- -D warnings"
+        run: cargo build
       - name: Verify tests complete
         run: "cargo test -- -D warnings"
       - name: Verify code style
@@ -32,7 +32,7 @@ jobs:
       - name: Set directory
         run: cd ${{ github.workspace }}/specification-derive
       - name: Verify code compiles
-        run: cargo build \\-\\- -D warnings
+        run: cargo build
       - name: Verify tests complete
         run: "cargo test -- -D warnings"
       - name: Verify code style
@@ -50,7 +50,7 @@ jobs:
       - name: Set directory
         run: cd ${{ github.workspace }}
       - name: Verify code compiles
-        run: "cargo build \\-\\- -D warnings"
+        run: cargo build
       - name: Verify tests complete
         run: "cargo test -- -D warnings"
       - name: Verify code style
