@@ -59,7 +59,7 @@ pub struct TagIterator<R: Read, TSpec>
     emission_queue: VecDeque<Result<TSpec, TagIteratorError>>,
 }
 
-impl<'a, R: Read, TSpec> TagIterator<R, TSpec>
+impl<R: Read, TSpec> TagIterator<R, TSpec>
     where
     TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {
