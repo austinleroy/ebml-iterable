@@ -179,8 +179,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
         let start = self.current_offset();
 
-        let is_master = matches!(spec_tag_type, TagDataType::Master);
-        let raw_data = if is_master {
+        let raw_data = if matches!(spec_tag_type, TagDataType::Master) {
             &[]
         } else if let Known(size) = size {
             self.read_tag_data(size)?
@@ -240,12 +239,8 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
     fn read_next(&mut self) {
         //If we have reached the known end of any open master tags, queue that tag and all children to emit ends
-        if let Some(index) = self.tag_stack.iter().position(|tag| {
-            match tag.size {
-                Unknown => false,
-                Known(size) => self.current_offset() >= tag.start + size
-            }
-        }) {
+        let ended_tag_index = self.tag_stack.iter().position(|tag| matches!(tag.size, Known(size) if self.current_offset() >= tag.start + size));
+        if let Some(index) = ended_tag_index {
             self.emission_queue.extend(self.tag_stack.drain(index..).map(|t| Ok(t.tag)).rev());
         }
 
