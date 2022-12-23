@@ -144,8 +144,12 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         self.ensure_data_read(8)?;
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
-                self.internal_buffer_position += length;
-                Ok(value + (1 << (7 * length)))
+                if length > self.buffered_byte_length {
+                    Err(TagIteratorError::CorruptedFileData(String::from("Reading tag id exceeded length of file.")))
+                } else {
+                    self.internal_buffer_position += length;
+                    Ok(value + (1 << (7 * length)))
+                }
             },
             None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag id, but reached end of source."))),
         }
@@ -155,8 +159,12 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         self.ensure_data_read(8)?;
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
-                self.internal_buffer_position += length;
-                Ok(EBMLSize::new(value, length))
+                if length > self.buffered_byte_length {
+                    Err(TagIteratorError::CorruptedFileData(String::from("Reading tag size exceeded length of file.")))
+                } else {
+                    self.internal_buffer_position += length;
+                    Ok(EBMLSize::new(value, length))
+                }
             },
             None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag size, but reached end of source."))),
         }
