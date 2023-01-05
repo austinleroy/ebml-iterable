@@ -55,9 +55,37 @@ pub mod tag_iterator {
         ///
         /// An error indicating that the file being read is not valid ebml.
         ///
-        /// This error typically occurs if the file ends unexpectedly or has an unreadable tag id.
+        /// This error typically occurs if the file has an unreadable tag id.
         ///
         CorruptedFileData(String),
+
+        ///
+        /// An error indicating that the iterator reached the end of the input stream unexpectedly while reading a tag.
+        /// 
+        /// This error will occur if the iterator is expecting more data (either due to expecting a size after reading a tag id or based on a tag size) but nothing is available in the input stream.
+        /// 
+        UnexpectedEOF {
+
+            ///
+            /// The start position of the tag that was being read when EOF was reached.
+            /// 
+            tag_start: usize,
+
+            ///
+            /// The id of the partially read tag, if available.
+            /// 
+            tag_id: Option<u64>,
+
+            ///
+            /// The size of the partially read tag, if available.
+            /// 
+            tag_size: Option<usize>,
+
+            ///
+            /// Any available data that was read for the tag before reaching EOF.
+            /// 
+            partial_data: Option<Vec<u8>>,
+        },
 
         ///
         /// An error indicating that tag data appears to be corrupted.
@@ -93,6 +121,12 @@ pub mod tag_iterator {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
                 TagIteratorError::CorruptedFileData(message) => write!(f, "Encountered corrupted data.  Message: {}", message),
+                TagIteratorError::UnexpectedEOF { 
+                    tag_start, 
+                    tag_id, 
+                    tag_size, 
+                    partial_data: _ 
+                } => write!(f, "Reached EOF unexpectedly. Partial tag data: {{tag offset:{}}} {{id:{:x?}}} {{size:{:?}}}", tag_start, tag_id, tag_size),
                 TagIteratorError::CorruptedTagData {
                     tag_id,
                     problem,
@@ -106,6 +140,7 @@ pub mod tag_iterator {
         fn source(&self) -> Option<&(dyn Error + 'static)> {
             match self {
                 TagIteratorError::CorruptedFileData(_) => None,
+                TagIteratorError::UnexpectedEOF { tag_start: _, tag_id: _, tag_size: _, partial_data: _ } => None,
                 TagIteratorError::CorruptedTagData { tag_id: _, problem } => problem.source(),
                 TagIteratorError::ReadError { source } => Some(source),
             }

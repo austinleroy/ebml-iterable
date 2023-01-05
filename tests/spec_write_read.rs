@@ -1,6 +1,7 @@
 mod test_spec;
 
 pub mod spec_write_read {
+    use ebml_iterable::error::TagIteratorError;
     use ebml_iterable::specs::{Master, EbmlTag};
     use ebml_iterable::{TagIterator, TagWriter};
     use std::io::Cursor;
@@ -152,5 +153,43 @@ pub mod spec_write_read {
         assert!(matches!(iter.next(), Some(Ok(TestSpec::Int(2)))));
         assert!(matches!(iter.next(), Some(Ok(TestSpec::Root(Master::End)))));
         assert!(matches!(iter.next(), None));
+    }
+
+    #[test]
+    pub fn eof_error_is_helpful() {
+        let tags: Vec<TestSpec> = vec![
+            TestSpec::Ebml(Master::Start),
+            TestSpec::Segment(Master::Start),
+            TestSpec::TrackType(0x01),
+            TestSpec::Child(3),
+            TestSpec::Int(1),
+            TestSpec::Block(vec![0, 1, 2, 3, 4, 5, 6, 7, 8]),
+            TestSpec::Segment(Master::End),
+            TestSpec::Ebml(Master::End),
+        ];
+
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        for tag in tags.iter() {
+            writer.write(tag).expect("Test shouldn't error");
+        }
+
+        println!("dest {:?}", dest);
+
+        let mut src = Cursor::new(dest.get_ref()[0..26].to_vec());
+        let reader = TagIterator::new(&mut src, &[]);
+        let mut iter = reader.into_iter().skip_while(|x: &Result<TestSpec, TagIteratorError>| x.is_ok());
+
+        let err = iter.next().expect("Shouldn't have reached end of data");
+        
+        match err.expect_err("Should be an error") {
+            TagIteratorError::UnexpectedEOF { tag_start, tag_id, tag_size, partial_data: _ } => {
+                assert_eq!(tag_start, 22);
+                assert_eq!(tag_id, Some(TestSpec::Block(vec![]).get_id()));
+                assert_eq!(tag_size, Some(9));
+            },
+            _ => assert!(false)
+        }
     }
 }
