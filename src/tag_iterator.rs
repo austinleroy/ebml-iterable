@@ -130,7 +130,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             while self.internal_buffer_position + length > self.buffered_byte_length {
                 self.buffer.copy_within(self.internal_buffer_position..self.buffered_byte_length, 0);
                 self.buffered_byte_length -= self.internal_buffer_position;
-                self.buffer_offset = Some(self.buffer_offset.unwrap() + self.internal_buffer_position);
+                self.buffer_offset = Some(self.current_offset());
                 self.internal_buffer_position = 0;
                 if !self.private_read(self.buffered_byte_length)? {
                     return Ok(false);
@@ -140,40 +140,40 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         Ok(true)
     }
 
-    fn read_tag_id(&mut self) -> Result<u64, TagIteratorError> {
+    fn read_tag_id(&mut self) -> Result<Option<u64>, TagIteratorError> {
         self.ensure_data_read(8)?;
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
                 if length > self.buffered_byte_length {
-                    Err(TagIteratorError::CorruptedFileData(String::from("Reading tag id exceeded length of file.")))
+                    Ok(None)
                 } else {
                     self.internal_buffer_position += length;
-                    Ok(value + (1 << (7 * length)))
+                    Ok(Some(value + (1 << (7 * length))))
                 }
             },
-            None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag id, but reached end of source."))),
+            None => Ok(None)
         }
     }
 
-    fn read_tag_size(&mut self) -> Result<EBMLSize, TagIteratorError> {
+    fn read_tag_size(&mut self) -> Result<Option<EBMLSize>, TagIteratorError> {
         self.ensure_data_read(8)?;
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
                 if length > self.buffered_byte_length {
-                    Err(TagIteratorError::CorruptedFileData(String::from("Reading tag size exceeded length of file.")))
+                    Ok(None)
                 } else {
                     self.internal_buffer_position += length;
-                    Ok(EBMLSize::new(value, length))
+                    Ok(Some(EBMLSize::new(value, length)))
                 }
             },
-            None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag size, but reached end of source."))),
+            None => Ok(None)
         }
     }
 
     fn read_tag_data(&mut self, size: usize) -> Result<&[u8], TagIteratorError> {
         self.ensure_capacity(size);
         if !self.ensure_data_read(size)? {
-            return Err(TagIteratorError::CorruptedFileData(String::from("reached end of file but expecting more data")));
+            return Err(TagIteratorError::UnexpectedEOF { tag_start: 0, tag_id: None, tag_size: None, partial_data: Some(self.buffer[self.internal_buffer_position..].to_vec()) });
         }
 
         self.internal_buffer_position += size;
@@ -181,8 +181,22 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     }
 
     fn read_tag(&mut self) -> Result<ProcessingTag<TSpec>, TagIteratorError> {
-        let tag_id = self.read_tag_id()?;
-        let size: EBMLSize = self.read_tag_size()?;
+        let start_read_offset = self.current_offset();
+
+        let tag_id = self.read_tag_id().and_then(|res| {
+            if let Some(res) = res {
+                Ok(res)
+            } else {
+                Err(TagIteratorError::UnexpectedEOF { tag_start: start_read_offset, tag_id: None, tag_size: None, partial_data: None })
+            }
+        })?;
+        let size: EBMLSize = self.read_tag_size().and_then(|res| {
+            if let Some(res) = res {
+                Ok(res)
+            } else {
+                Err(TagIteratorError::UnexpectedEOF { tag_start: start_read_offset, tag_id: Some(tag_id), tag_size: None, partial_data: None })
+            }
+        })?;
 
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
         let start = self.current_offset();
@@ -190,7 +204,13 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         let raw_data = if matches!(spec_tag_type, TagDataType::Master) {
             &[]
         } else if let Known(size) = size {
-            self.read_tag_data(size)?
+            self.read_tag_data(size).map_err(|err| {
+                if let TagIteratorError::UnexpectedEOF{ tag_start: _, tag_id: _, tag_size: _, partial_data} = err {
+                    TagIteratorError::UnexpectedEOF { tag_start: start_read_offset, tag_id: Some(tag_id), tag_size: Some(size), partial_data }
+                } else {
+                    err
+                }
+            })?
         } else {
             return Err(TagIteratorError::CorruptedFileData("Unknown size for primitive tag not allowed".into()));
         };
@@ -300,6 +320,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     }
 
     fn buffer_master(&mut self, tag_id: u64) {
+        let tag_start = self.current_offset();
         let pre_queue_len = self.emission_queue.len();
 
         let mut position = pre_queue_len;
@@ -308,7 +329,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                 self.read_next();
     
                 if position >= self.emission_queue.len() {
-                    self.emission_queue.push_back(Err(TagIteratorError::CorruptedFileData(format!("Reached end of file when buffering tag 0x{:x?}", tag_id))));
+                    self.emission_queue.push_back(Err(TagIteratorError::UnexpectedEOF{ tag_start, tag_id: Some(tag_id), tag_size: None, partial_data: None }));
                     return;
                 }
             }
@@ -332,7 +353,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         let split_to = position - pre_queue_len;
         if children.get(split_to).unwrap().is_ok() {
             let remaining = children.split_off(split_to).into_iter().skip(1);
-            let full_tag = self.roll_up_children(tag_id, children.into_iter().map(|c| c.unwrap()).collect());
+            let full_tag = Self::roll_up_children(tag_id, children.into_iter().map(|c| c.unwrap()).collect());
             self.emission_queue.push_back(Ok(full_tag));
             self.emission_queue.extend(remaining);
         } else {
@@ -340,7 +361,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         }
     }
 
-    fn roll_up_children(&self, tag_id: u64, children: Vec<TSpec>) -> TSpec {
+    fn roll_up_children(tag_id: u64, children: Vec<TSpec>) -> TSpec {
         let mut rolled_children = Vec::new();
 
         let mut iter = children.into_iter();
@@ -348,7 +369,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             if let Some(Master::Start) = child.as_master() {
                 let child_id = child.get_id();
                 let subchildren = iter.by_ref().take_while(|c| !matches!(c.as_master(), Some(Master::End)) || c.get_id() != child_id).collect();
-                rolled_children.push(self.roll_up_children(child_id, subchildren));
+                rolled_children.push(Self::roll_up_children(child_id, subchildren));
             } else {
                 rolled_children.push(child);
             }
