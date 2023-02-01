@@ -35,7 +35,8 @@ pub struct ProcessingTag<TSpec>
 {
     pub tag: TSpec,
     pub size: EBMLSize,
-    pub start: usize,    
+    pub tag_start: usize,
+    pub data_start: usize,
 }
 
 impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone {

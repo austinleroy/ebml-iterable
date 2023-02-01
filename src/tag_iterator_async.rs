@@ -109,7 +109,8 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             self.tag_stack.push(ProcessingTag {
                 tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
                 size,
-                start: current_offset,
+                data_start: current_offset,
+                tag_start: 0 //not implemented here
             });
             Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)))
         } else {
@@ -155,7 +156,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                         );
                         
                     if previous_tag_ended {
-                        Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), start: current_offset }).into_inner())
+                        Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), data_start: current_offset, tag_start: 0 }).into_inner())
                     } else {
                         Ok(tag)
                     }
@@ -168,7 +169,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
     pub async fn next(&mut self) -> Option<Result<TSpec, TagIteratorError>> {
         if let Some(tag) = self.tag_stack.pop() {
             if let Known(size) = tag.size {
-                if self.current_offset() >= tag.start + size {
+                if self.current_offset() >= tag.data_start + size {
                     return Some(Ok(tag.tag));
                 }
             }

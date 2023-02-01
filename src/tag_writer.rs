@@ -36,6 +36,30 @@ impl<W: Write> TagWriter<W>
         }
     }
 
+    ///
+    /// Consumes self and returns the underlying write stream.
+    /// 
+    /// Any incomplete tags are written out before returning the stream.
+    /// 
+    pub fn into_inner(mut self) -> Result<W, TagWriterError> {
+        self.flush()?;
+        Ok(self.dest)
+    }
+
+    ///
+    /// Gets a mutable reference to the underlying write stream.
+    /// 
+    pub fn get_mut(&mut self) -> &mut W {
+        &mut self.dest
+    }
+
+    ///
+    /// Gets a reference to the underlying write stream.
+    /// 
+    pub fn get_ref(&self) -> &W {
+        &self.dest
+    }
+
     fn start_tag(&mut self, id: u64) {
         self.open_tags.push((id, Known(self.working_buffer.len())));
     }

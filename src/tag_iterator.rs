@@ -56,7 +56,8 @@ pub struct TagIterator<R: Read, TSpec>
     buffered_byte_length: usize,
     internal_buffer_position: usize,
     tag_stack: Vec<ProcessingTag<TSpec>>,
-    emission_queue: VecDeque<Result<TSpec, TagIteratorError>>,
+    emission_queue: VecDeque<Result<(TSpec, usize), TagIteratorError>>,
+    last_emitted_tag_offset: usize,
 }
 
 impl<R: Read, TSpec> TagIterator<R, TSpec>
@@ -90,7 +91,40 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             internal_buffer_position: 0,
             tag_stack: Vec::new(),
             emission_queue: VecDeque::new(),
+            last_emitted_tag_offset: 0,
         }
+    }
+
+    ///
+    /// Consumes self and returns the underlying read stream.
+    /// 
+    /// Note that any leftover tags in the internal emission queue are lost. Therefore, constructing a new TagIterator using the returned stream may lead to data loss.
+    /// 
+    pub fn into_inner(self) -> R {
+        self.source
+    }
+
+    ///
+    /// Gets a mutable reference to the underlying read stream.
+    /// 
+    pub fn get_mut(&mut self) -> &mut R {
+        &mut self.source
+    }
+
+    ///
+    /// Gets a reference to the underlying read stream.
+    /// 
+    pub fn get_ref(&self) -> &R {
+        &self.source
+    }
+
+    ///
+    /// Returns the byte offset of the last emitted tag.
+    /// 
+    /// This function returns a byte index specifying the start of the last emitted tag in the context of the [`TagIterator`]'s source read stream.  This value is *not guaranteed to always increase as the file is read*.  Whenever the iterator emits a [`Master::End`] variant, [`Self::last_emitted_tag_offset()`] will reflect the start index of the "Master" tag, which will be before previous values that were obtainable when any children of the master were emitted.
+    /// 
+    pub fn last_emitted_tag_offset(&self) -> usize {
+        self.last_emitted_tag_offset
     }
 
     fn current_offset(&self) -> usize {
@@ -181,32 +215,32 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     }
 
     fn read_tag(&mut self) -> Result<ProcessingTag<TSpec>, TagIteratorError> {
-        let start_read_offset = self.current_offset();
+        let tag_start = self.current_offset();
 
         let tag_id = self.read_tag_id().and_then(|res| {
             if let Some(res) = res {
                 Ok(res)
             } else {
-                Err(TagIteratorError::UnexpectedEOF { tag_start: start_read_offset, tag_id: None, tag_size: None, partial_data: None })
+                Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: None, tag_size: None, partial_data: None })
             }
         })?;
         let size: EBMLSize = self.read_tag_size().and_then(|res| {
             if let Some(res) = res {
                 Ok(res)
             } else {
-                Err(TagIteratorError::UnexpectedEOF { tag_start: start_read_offset, tag_id: Some(tag_id), tag_size: None, partial_data: None })
+                Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: None, partial_data: None })
             }
         })?;
 
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
-        let start = self.current_offset();
+        let data_start = self.current_offset();
 
         let raw_data = if matches!(spec_tag_type, TagDataType::Master) {
             &[]
         } else if let Known(size) = size {
             self.read_tag_data(size).map_err(|err| {
                 if let TagIteratorError::UnexpectedEOF{ tag_start: _, tag_id: _, tag_size: _, partial_data} = err {
-                    TagIteratorError::UnexpectedEOF { tag_start: start_read_offset, tag_id: Some(tag_id), tag_size: Some(size), partial_data }
+                    TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: Some(size), partial_data }
                 } else {
                     err
                 }
@@ -240,7 +274,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             },
         };
 
-        Ok(ProcessingTag { tag, size, start })
+        Ok(ProcessingTag { tag, size, tag_start, data_start })
     }
 
     fn read_tag_checked(&mut self) -> Option<Result<ProcessingTag<TSpec>, TagIteratorError>> {
@@ -267,9 +301,9 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
     fn read_next(&mut self) {
         //If we have reached the known end of any open master tags, queue that tag and all children to emit ends
-        let ended_tag_index = self.tag_stack.iter().position(|tag| matches!(tag.size, Known(size) if self.current_offset() >= tag.start + size));
+        let ended_tag_index = self.tag_stack.iter().position(|tag| matches!(tag.size, Known(size) if self.current_offset() >= tag.data_start + size));
         if let Some(index) = ended_tag_index {
-            self.emission_queue.extend(self.tag_stack.drain(index..).map(|t| Ok(t.tag)).rev());
+            self.emission_queue.extend(self.tag_stack.drain(index..).map(|t| Ok((t.tag, t.tag_start))).rev());
         }
 
         if let Some(next_read) = self.read_tag_checked() {
@@ -289,7 +323,8 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                         );
         
                     if previous_tag_ended {
-                        self.emission_queue.push_back(Ok(self.tag_stack.pop().unwrap().tag));
+                        let t = self.tag_stack.pop().unwrap();
+                        self.emission_queue.push_back(Ok((t.tag, t.tag_start)));
                     } else {
                         break;
                     }
@@ -301,7 +336,8 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                     self.tag_stack.push(ProcessingTag {
                         tag: TSpec::get_master_tag(tag_id, Master::End).unwrap(),
                         size: next_tag.size,
-                        start: next_tag.start,
+                        tag_start: next_tag.tag_start,
+                        data_start: next_tag.data_start
                     });
 
                     if self.tag_ids_to_buffer.contains(&tag_id) {
@@ -311,10 +347,10 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                 }
             }
 
-            self.emission_queue.push_back(next_read.map(|r| r.tag));
+            self.emission_queue.push_back(next_read.map(|r| (r.tag, r.tag_start)));
         } else {
             while let Some(tag) = self.tag_stack.pop() {
-                self.emission_queue.push_back(Ok(tag.tag));
+                self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
             }
         }
     }
@@ -339,7 +375,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                     match r {
                         Err(_) => break 'endTagSearch,
                         Ok(t) => {
-                            if t.get_id() == tag_id && matches!(t.as_master(), Some(Master::End)) {
+                            if t.0.get_id() == tag_id && matches!(t.0.as_master(), Some(Master::End)) {
                                 break 'endTagSearch;
                             }
                         }
@@ -353,8 +389,8 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         let split_to = position - pre_queue_len;
         if children.get(split_to).unwrap().is_ok() {
             let remaining = children.split_off(split_to).into_iter().skip(1);
-            let full_tag = Self::roll_up_children(tag_id, children.into_iter().map(|c| c.unwrap()).collect());
-            self.emission_queue.push_back(Ok(full_tag));
+            let full_tag = Self::roll_up_children(tag_id, children.into_iter().map(|c| c.unwrap().0).collect());
+            self.emission_queue.push_back(Ok((full_tag, tag_start)));
             self.emission_queue.extend(remaining);
         } else {
             self.emission_queue.extend(children.drain(split_to..).take(1));
@@ -388,6 +424,10 @@ impl<R: Read, TSpec> Iterator for TagIterator<R, TSpec>
         if self.emission_queue.is_empty() {
             self.read_next();
         }
-        self.emission_queue.pop_front()
+        let next_item = self.emission_queue.pop_front();
+        if let Some(Ok(ref tuple)) = next_item {
+            self.last_emitted_tag_offset = tuple.1;
+        }
+        next_item.map(|r| r.map(|t| t.0))
     }
 }

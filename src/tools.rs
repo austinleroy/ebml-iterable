@@ -24,7 +24,7 @@ pub trait Vint: Into<u64> + Copy {
         check_size_u64(val)?;
         let mut length = 1;
         while length <= 8 {
-            if val < (1 << ((7 * length) - 1)) {
+            if val < (1 << (7 * length)) {
                 break;
             }
             length += 1;
@@ -209,6 +209,21 @@ mod tests {
     fn write_vint_sixteen() {
         let result = 16u64.as_vint().expect("Writing vint failed");
         assert_eq!(vec![144u8], result);
+    }
+
+    #[test]
+    fn read_vint_one_twenty_seven() {
+        let buffer = [255u8];
+        let result = read_vint(&buffer).unwrap().expect("Reading vint failed");
+
+        assert_eq!(127, result.0);
+        assert_eq!(1, result.1);
+    }
+
+    #[test]
+    fn write_vint_one_twenty_seven() {
+        let result = 127u64.as_vint().expect("Writing vint failed");
+        assert_eq!(vec![255u8], result);
     }
 
     #[test]
