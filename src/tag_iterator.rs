@@ -98,7 +98,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     ///
     /// Consumes self and returns the underlying read stream.
     /// 
-    /// Note that any leftover tags in the internal emission queue are lost. Therefore, constructing a new TagIterator using the returned stream may lead to data loss.
+    /// Note that any leftover tags in the internal emission queue are lost, and any data read into [`TagIterator`]'s internal buffer is dropped. Therefore, constructing a new [`TagIterator`] using the returned stream may lead to data loss unless it is rewound.
     /// 
     pub fn into_inner(self) -> R {
         self.source
@@ -107,12 +107,16 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     ///
     /// Gets a mutable reference to the underlying read stream.
     /// 
+    /// It is inadvisable to directly read from the underlying stream.
+    /// 
     pub fn get_mut(&mut self) -> &mut R {
         &mut self.source
     }
 
     ///
     /// Gets a reference to the underlying read stream.
+    /// 
+    /// It is inadvisable to directly read from the underlying stream.
     /// 
     pub fn get_ref(&self) -> &R {
         &self.source
