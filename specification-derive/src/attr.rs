@@ -46,11 +46,11 @@ fn validate_parents(origin: &crate::ast::Variant, variants_map: &HashMap<&Ident,
     let mut variant = origin;
     while let Some(parent) = variant.parent_attr.as_ref().map(|(id, _)| *variants_map.get(id).unwrap()) {
         if parent.data_type_attr.0 != Master {
-            return Err(Error::new_spanned(&parent.original, "Parents must be of Master type"))
+            return Err(Error::new_spanned(parent.original, "Parents must be of Master type"))
         }
 
         if explored.contains_key(&parent.ident) {
-            return Err(explored.into_iter().map(|(_, origin)|Error::new_spanned(&origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
+            return Err(explored.into_values().map(|origin|Error::new_spanned(origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
                 a.combine(b);
                 a
             }).unwrap());
@@ -89,7 +89,7 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
         } else if data_type == "Float" {
             quote!( (f64) )
         } else {
-            return Err(Error::new_spanned(data_type_attribute.clone(), format!("unknown data_type \"{}\"", data_type)));
+            return Err(Error::new_spanned(data_type_attribute.clone(), format!("unknown data_type \"{data_type}\"")));
         };
 
         var.attrs.retain(|a| !(a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("parent")));

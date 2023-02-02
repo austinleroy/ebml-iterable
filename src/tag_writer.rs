@@ -260,7 +260,7 @@ impl<W: Write> TagWriter<W>
         match tag_type {
             TagDataType::Master => {},
             _ => {
-                return Err(TagWriterError::TagSizeError(format!("Cannot write an unknown size for tag of type {:?}", tag_type)))
+                return Err(TagWriterError::TagSizeError(format!("Cannot write an unknown size for tag of type {tag_type:?}")))
             }
         };
         self.working_buffer.extend(tag_id.to_be_bytes().iter().skip_while(|&v| *v == 0u8));

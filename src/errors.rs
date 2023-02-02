@@ -21,11 +21,11 @@ pub mod tool {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
                 ToolError::ReadVintOverflow => write!(f, "Unrepresentable Vint size encountered."),
-                ToolError::WriteVintOverflow(val) => write!(f, "Value too large to be written as a vint: {}", val),
-                ToolError::ReadU64Overflow(arr) => write!(f, "Could not read unsigned int from array: {:?}", arr),
-                ToolError::ReadI64Overflow(arr) => write!(f, "Could not read int from array: {:?}", arr),
-                ToolError::ReadF64Mismatch(arr) => write!(f, "Could not read float from array: {:?}", arr),
-                ToolError::FromUtf8Error(arr, _source) => write!(f, "Could not read utf8 data: {:?}", arr),
+                ToolError::WriteVintOverflow(val) => write!(f, "Value too large to be written as a vint: {val}"),
+                ToolError::ReadU64Overflow(arr) => write!(f, "Could not read unsigned int from array: {arr:?}"),
+                ToolError::ReadI64Overflow(arr) => write!(f, "Could not read int from array: {arr:?}"),
+                ToolError::ReadF64Mismatch(arr) => write!(f, "Could not read float from array: {arr:?}"),
+                ToolError::FromUtf8Error(arr, _source) => write!(f, "Could not read utf8 data: {arr:?}"),
             }
         }
     }
@@ -120,17 +120,17 @@ pub mod tag_iterator {
     impl fmt::Display for TagIteratorError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                TagIteratorError::CorruptedFileData(message) => write!(f, "Encountered corrupted data.  Message: {}", message),
+                TagIteratorError::CorruptedFileData(message) => write!(f, "Encountered corrupted data.  Message: {message}"),
                 TagIteratorError::UnexpectedEOF { 
                     tag_start, 
                     tag_id, 
                     tag_size, 
                     partial_data: _ 
-                } => write!(f, "Reached EOF unexpectedly. Partial tag data: {{tag offset:{}}} {{id:{:x?}}} {{size:{:?}}}", tag_start, tag_id, tag_size),
+                } => write!(f, "Reached EOF unexpectedly. Partial tag data: {{tag offset:{tag_start}}} {{id:{tag_id:x?}}} {{size:{tag_size:?}}}"),
                 TagIteratorError::CorruptedTagData {
                     tag_id,
                     problem,
-                } => write!(f, "Error reading data for tag id (0x{:x?}). {}", tag_id, problem),
+                } => write!(f, "Error reading data for tag id (0x{tag_id:x?}). {problem}"),
                 TagIteratorError::ReadError { source: _ } => write!(f, "Error reading from source."),
             }
         }
@@ -197,10 +197,10 @@ pub mod tag_writer {
     impl fmt::Display for TagWriterError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                TagWriterError::TagSizeError(message) => write!(f, "Problem writing data tag size. {}", message),
+                TagWriterError::TagSizeError(message) => write!(f, "Problem writing data tag size. {message}"),
                 TagWriterError::UnexpectedClosingTag { tag_id, expected_id } => match expected_id {
-                    Some(expected) => write!(f, "Unexpected closing tag 0x'{:x?}'. Expected 0x'{:x?}'", tag_id, expected),
-                    None => write!(f, "Unexpected closing tag 0x'{:x?}'", tag_id),
+                    Some(expected) => write!(f, "Unexpected closing tag 0x'{tag_id:x?}'. Expected 0x'{expected:x?}'"),
+                    None => write!(f, "Unexpected closing tag 0x'{tag_id:x?}'"),
                 },
                 TagWriterError::WriteError { source: _ } => write!(f, "Error writing to destination."),
             }

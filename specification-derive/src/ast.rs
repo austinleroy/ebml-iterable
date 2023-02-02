@@ -83,7 +83,7 @@ impl<'a> Variant<'a> {
                 } else if data_type_name == "Master" {
                     TagDataType::Master
                 } else {
-                    return Err(Error::new_spanned(val, format!("unrecognized `ebml_iterable::TagDataType` value: {}", data_type_name)));
+                    return Err(Error::new_spanned(val, format!("unrecognized `ebml_iterable::TagDataType` value: {data_type_name}")));
                 };
                 data_type_attr = Some((data_type_val, val, Attribute {
                     original: attr,
