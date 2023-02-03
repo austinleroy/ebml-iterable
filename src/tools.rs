@@ -21,7 +21,7 @@ pub trait Vint: Into<u64> + Copy {
     /// 
     fn as_vint(&self) -> Result<Vec<u8>, ToolError> {
         let val: u64 = (*self).into();
-        check_size_u64(val)?;
+        check_size_u64(val, 8)?;
         let mut length = 1;
         while length <= 8 {
             if val < (1 << (7 * length)) {
@@ -42,7 +42,7 @@ pub trait Vint: Into<u64> + Copy {
     /// 
     fn as_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError> {
         let val: u64 = (*self).into();
-        check_size_u64(val)?;
+        check_size_u64(val, length)?;
         Ok(as_vint_no_check_u64(val, length))
     }
 }
@@ -52,14 +52,16 @@ impl Vint for u32 { }
 impl Vint for u16 { }
 impl Vint for u8 { }
 
-fn check_size_u64(val: u64) -> Result<(), ToolError> {
-    if val > (1 << 56) - 1 {
+#[inline]
+fn check_size_u64(val: u64, max_length: usize) -> Result<(), ToolError> {
+    if val >= (1 << max_length * 7) {
         Err(ToolError::WriteVintOverflow(val))
     } else {
         Ok(())
     }
 }
 
+#[inline]
 fn as_vint_no_check_u64(val: u64, length: usize) -> Vec<u8> {
     let bytes: [u8; 8] = val.to_be_bytes();
     let mut result: Vec<u8> = Vec::from(&bytes[(8-length)..]);
@@ -83,10 +85,11 @@ pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
         return Ok(None);
     }
 
-    let length: usize = buffer[0].leading_zeros() as usize + 1;
-    if length > 8 {
+    if buffer[0] == 0 {
         return Err(ToolError::ReadVintOverflow)
     }
+
+    let length = 8 - buffer[0].ilog2() as usize;
 
     if length > buffer.len() {
         // Not enough data in the buffer to read out the vint value
@@ -99,6 +102,134 @@ pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
     for item in buffer.iter().take(length).skip(1) {
         value <<= 8;
         value += *item as u64;
+    }
+
+    Ok(Some((value, length)))
+}
+
+///
+/// Trait to enable easy serialization to a signed vint.
+/// 
+/// This is only available for types that can be cast as `i64`.  A signed vint can be written as a variable number of bytes just like a regular vint, but the value portion of the vint is expressed in two's complement notation.
+/// 
+/// For example, the decimal number "-33" would be written as [0xDF = 1101 1111].  This value is determined by first taking the two's complement of 33 [0x21 = 0010 0001] **but only using the bits available for the vint value**.  In this case, that is 7 bits (because the vint marker takes up the 8th bit).  The two's complement is [101 1111]. A handy calculator for two's complement can be found [here](https://www.omnicalculator.com/math/twos-complement).  Once the two's complement has been found, simply prepend the vint marker as usual to get [1101 1111 = 0xDF].
+/// 
+/// Some more examples:
+/// ```
+/// use ebml_iterable::tools::SignedVint;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// assert_eq!(vec![0xDF], (-33i64).as_signed_vint().unwrap());
+/// assert_eq!(vec![0x40, 0xC8], (200i64).as_signed_vint().unwrap());
+/// assert_eq!(vec![0x7F, 0x38], (-200i64).as_signed_vint().unwrap());
+/// assert_eq!(vec![0xFF], (-1i64).as_signed_vint().unwrap());
+/// # Ok(())
+/// # }
+/// ```
+pub trait SignedVint: Into<i64> + Copy {
+    ///
+    /// Returns a representation of the current value as a vint array.
+    /// 
+    /// # Errors
+    ///
+    /// This can return an error if the value is outside of the range that can be represented as a vint.
+    /// 
+    fn as_signed_vint(&self) -> Result<Vec<u8>, ToolError> {
+        let val: i64 = (*self).into();
+        check_size_i64(val, 8)?;
+        let mut length = 1;
+        while length <= 8 {
+            if val >= -(1 << (7 * length - 1)) && val < (1 << (7 * length - 1)) {
+                break;
+            }
+            length += 1;
+        }
+
+        Ok(as_vint_no_check_i64(val, length))
+    }
+
+    ///
+    /// Returns a representation of the current value as a vint array with a specified length.
+    /// 
+    /// # Errors
+    ///
+    /// This can return an error if the value is outside of the range that can be represented as a vint.
+    /// 
+    fn as_signed_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError> {
+        let val: i64 = (*self).into();
+        check_size_i64(val, length)?;
+        Ok(as_vint_no_check_i64(val, length))
+    }
+}
+
+impl SignedVint for i64 { }
+impl SignedVint for i32 { }
+impl SignedVint for i16 { }
+impl SignedVint for i8 { }
+
+#[inline]
+fn check_size_i64(val: i64, max_length: usize) -> Result<(), ToolError> {
+    if val <= -(1 << (max_length * 7 - 1)) || val >= (1 << (max_length * 7 - 1)) {
+        Err(ToolError::WriteSignedVintOverflow(val))
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn as_vint_no_check_i64(val: i64, length: usize) -> Vec<u8> {
+    let bytes: [u8; 8] = val.to_be_bytes();
+    let mut result: Vec<u8> = Vec::from(&bytes[(8-length)..]);
+    if val < 0 {
+        result[0] &= 0xFF >> (length-1);
+    } else {
+        result[0] |= 1 << (8 - length);
+    }
+    result
+}
+
+/// 
+/// Reads a signed vint from the beginning of the input array slice.
+/// 
+/// This method returns an option with the `None` variant used to indicate there was not enough data in the buffer to completely read a vint.
+/// 
+/// The returned tuple contains the value of the vint (`i64`) and the length of the vint (`usize`).  The length will be less than or equal to the length of the input slice.
+/// 
+/// # Errors
+///
+/// This method can return a `ToolError` if the input array cannot be read as a vint.
+/// 
+pub fn read_signed_vint(buffer: &[u8]) -> Result<Option<(i64, usize)>, ToolError> {
+    if buffer.is_empty() {
+        return Ok(None);
+    }
+
+    if buffer[0] == 0 {
+        return Err(ToolError::ReadVintOverflow)
+    }
+
+    let length = 8 - buffer[0].ilog2() as usize;
+
+    if length > buffer.len() {
+        // Not enough data in the buffer to read out the vint value
+        return Ok(None);
+    }
+
+    let is_negative = if length == 8 {
+        buffer[1] & 0x80
+    } else {
+        buffer[0] & (0x80 >> length)
+    } > 0;
+
+    let mut value = if is_negative {
+        (buffer[0] as i64) | (!0i64 << (8 - length))
+    } else {
+        (buffer[0] & (0xFF >> length)) as i64
+    };
+
+    for item in buffer.iter().take(length).skip(1) {
+        value <<= 8;
+        value += *item as i64;
     }
 
     Ok(Some((value, length)))
@@ -277,6 +408,24 @@ mod tests {
     #[should_panic]
     fn too_big_for_vint() {
         (1u64 << 56).as_vint().expect("Writing vint failed");
+    }
+
+    #[test]
+    fn vint_encode_decode_range() {
+        for val in 0..500_000 {
+            let bytes = val.as_vint().unwrap();
+            let result = read_vint(bytes.as_slice()).unwrap().unwrap().0;
+            assert_eq!(val, result);
+        }
+    }
+
+    #[test]
+    fn signed_vint_encode_decode_range() {
+        for val in -500_000..500_000 {
+            let bytes = val.as_signed_vint().unwrap();
+            let result = read_signed_vint(bytes.as_slice()).unwrap().unwrap().0;
+            assert_eq!(val, result);
+        }
     }
 
     #[test]

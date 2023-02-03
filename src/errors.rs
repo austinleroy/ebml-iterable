@@ -11,6 +11,7 @@ pub mod tool {
     pub enum ToolError {
         ReadVintOverflow,
         WriteVintOverflow(u64),
+        WriteSignedVintOverflow(i64),
         ReadU64Overflow(Vec<u8>),
         ReadI64Overflow(Vec<u8>),
         ReadF64Mismatch(Vec<u8>),
@@ -22,6 +23,7 @@ pub mod tool {
             match self {
                 ToolError::ReadVintOverflow => write!(f, "Unrepresentable Vint size encountered."),
                 ToolError::WriteVintOverflow(val) => write!(f, "Value too large to be written as a vint: {val}"),
+                ToolError::WriteSignedVintOverflow(val) => write!(f, "Value outside range to be written as a vint: {val}"),
                 ToolError::ReadU64Overflow(arr) => write!(f, "Could not read unsigned int from array: {arr:?}"),
                 ToolError::ReadI64Overflow(arr) => write!(f, "Could not read int from array: {arr:?}"),
                 ToolError::ReadF64Mismatch(arr) => write!(f, "Could not read float from array: {arr:?}"),
