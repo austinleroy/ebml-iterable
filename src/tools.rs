@@ -54,7 +54,7 @@ impl Vint for u8 { }
 
 #[inline]
 fn check_size_u64(val: u64, max_length: usize) -> Result<(), ToolError> {
-    if val >= (1 << max_length * 7) {
+    if val >= 1 << (max_length * 7) {
         Err(ToolError::WriteVintOverflow(val))
     } else {
         Ok(())
