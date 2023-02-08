@@ -105,13 +105,12 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
     let spanned_master_enum = spanned_master_enum(input.original);
 
     let get_tag_data_type = input.variants.iter()
-        .filter(|v| !matches!(&v.data_type_attr.0, TagDataType::Binary))
         .map(|var: &crate::ast::Variant| {
             let id = &var.id_attr.0;
             let data_type = &var.data_type_attr.1;
 
             quote! {
-                #id => #data_type,
+                #id => Some(#data_type),
             }
         });
 
@@ -216,12 +215,10 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
 
     Ok(quote! {
         impl #impl_generics #ebml_spec_trait <#ty> for #ty #ty_generics #where_clause {
-            fn get_tag_data_type(id: u64) -> #tag_data_type {
+            fn get_tag_data_type(id: u64) -> Option<#tag_data_type> {
                 match id {
                     #(#get_tag_data_type)*
-                    _ => {
-                        #tag_data_type::Binary
-                    }
+                    _ => None
                 }
             }
 

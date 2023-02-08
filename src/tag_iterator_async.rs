@@ -104,7 +104,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
         let size = self.read_tag_size().await?;
         let current_offset = self.current_offset();
 
-        let is_master = matches!(spec_tag_type, TagDataType::Master);
+        let is_master = matches!(spec_tag_type, Some(TagDataType::Master));
         if is_master {
             self.tag_stack.push(ProcessingTag {
                 tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
@@ -122,23 +122,23 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             
             let raw_data = self.read_tag_data(size).await?;
             let tag = match spec_tag_type {
-                TagDataType::Master => { unreachable!("Master should have been handled before querying data") },
-                TagDataType::UnsignedInt => {
+                Some(TagDataType::Master) => { unreachable!("Master should have been handled before querying data") },
+                Some(TagDataType::UnsignedInt) => {
                     let val = tools::arr_to_u64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                     TSpec::get_unsigned_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was unsigned int, but could not get tag!", tag_id))
                 },
-                TagDataType::Integer => {
+                Some(TagDataType::Integer) => {
                     let val = tools::arr_to_i64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                     TSpec::get_signed_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was integer, but could not get tag!", tag_id))
                 },
-                TagDataType::Utf8 => {
+                Some(TagDataType::Utf8) => {
                     let val = String::from_utf8(raw_data.to_vec()).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: ToolError::FromUtf8Error(raw_data, e) })?;
                     TSpec::get_utf8_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was utf8, but could not get tag!", tag_id))
                 },
-                TagDataType::Binary => {
+                Some(TagDataType::Binary) | None => {
                     TSpec::get_binary_tag(tag_id, &raw_data).unwrap_or_else(|| TSpec::get_raw_tag(tag_id, &raw_data))
                 },
-                TagDataType::Float => {
+                Some(TagDataType::Float) => {
                     let val = tools::arr_to_f64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                     TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id))
                 },

@@ -50,6 +50,7 @@ pub struct TagIterator<R: Read, TSpec>
 {
     source: R,
     tag_ids_to_buffer: HashSet<u64>,
+    allow_unknown_ids: bool,
 
     buffer: Box<[u8]>,
     buffer_offset: Option<usize>,
@@ -85,6 +86,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         TagIterator {
             source,
             tag_ids_to_buffer: tags_to_buffer.iter().map(|tag| tag.get_id()).collect(),
+            allow_unknown_ids: true,
             buffer: buffer.into_boxed_slice(),
             buffered_byte_length: 0,
             buffer_offset: None,
@@ -93,6 +95,51 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             emission_queue: VecDeque::new(),
             last_emitted_tag_offset: 0,
         }
+    }
+
+    ///
+    /// Configures how this iterator handles EBML ids that aren't found in `<TSpec>`.
+    /// 
+    /// By default, the iterator assumes all data in the [`std::io::Read`] source is valid and that any found EBML ids that are not in `<TSpec>` are due to a bad spec implementation.  This method can be used to reverse that assumption so that any encountered ids not contained in the spec will result in a [`TagIteratorError::CorruptedFileData`] error.
+    /// 
+    /// This can help make the iterator more robust when reading damaged files.  Without skipping (the default), the iterator assumes the id and tag data size are correct and returns a "RawTag" containing the assumed binary contents.  However, if a file has corrupted data, the "size" of these corrupted tag ids is likely corrupt as well.  This typically manifests as a request for a massive allocation, causing delays and eventual crashing.  By eagerly returning an error, the application can decide how to handle the corrupted element quickly and efficiently.
+    /// 
+    /// > Note: TagIterators returned by [`Self::new()`] and [`Self::with_capacity()`] allow unknown ids by default.  Calling this method with `false` changes that.
+    /// 
+    pub fn allow_unknown_ids(&mut self, allow: bool) {
+        self.allow_unknown_ids = allow;
+    }
+
+    ///
+    /// Instructs the iterator to attempt to recover after reaching corrupted file data.
+    /// 
+    /// This method can be used to skip over corrupted sections of a read stream without recreating a new iterator.  The iterator will seek forward from its current internal position until it reaches either a valid EBML tag id or EOF.  After recovery, [`Iterator::next()`] *should* return an [`Ok`] result.
+    /// 
+    pub fn try_recover(&mut self) -> Result<(), TagIteratorError> {
+        let mut corrected = false;
+        while !corrected {
+            let next_tag_id = self.peek_tag_id().map(|r| r.0)?;
+            if let Some(data_type) = TSpec::get_tag_data_type(next_tag_id) {
+                // We can consider the situation corrected if there's a valid tag id that is
+                // - direct child of any open master
+                // - root element
+                let tag_parent_id = match data_type {
+                    TagDataType::Binary => { TSpec::get_binary_tag(next_tag_id, &[]).and_then(|t| t.get_parent_id()) },
+                    TagDataType::Float => { TSpec::get_float_tag(next_tag_id, 0f64).and_then(|t| t.get_parent_id()) },
+                    TagDataType::Integer => { TSpec::get_signed_int_tag(next_tag_id, 0).and_then(|t| t.get_parent_id()) },
+                    TagDataType::Master => { TSpec::get_master_tag(next_tag_id, Master::Start).and_then(|t| t.get_parent_id()) },
+                    TagDataType::UnsignedInt => { TSpec::get_unsigned_int_tag(next_tag_id, 0).and_then(|t| t.get_parent_id()) },
+                    TagDataType::Utf8 => { TSpec::get_utf8_tag(next_tag_id, String::new()).and_then(|t| t.get_parent_id()) },
+                };
+                if let Some(parent_id) = tag_parent_id {
+                    corrected = self.tag_stack.iter().any(|t| t.tag.get_id() == parent_id);
+                } else {
+                    corrected = true;
+                }
+            }
+            self.internal_buffer_position += 1;
+        }
+        Ok(())
     }
 
     ///
@@ -131,6 +178,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         self.last_emitted_tag_offset
     }
 
+    #[inline(always)]
     fn current_offset(&self) -> usize {
         self.buffer_offset.unwrap_or(0) + self.internal_buffer_position
     }
@@ -178,30 +226,40 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         Ok(true)
     }
 
-    fn read_tag_id(&mut self) -> Result<Option<u64>, TagIteratorError> {
+    #[inline(always)]
+    fn peek_tag_id(&mut self) -> Result<(u64, usize), TagIteratorError> {
         self.ensure_data_read(8)?;
-        match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
-            Some((value, length)) => {
-                if length > self.buffered_byte_length {
-                    Ok(None)
-                } else {
-                    self.internal_buffer_position += length;
-                    Ok(Some(value + (1 << (7 * length))))
-                }
-            },
-            None => Ok(None)
+        if self.buffer[self.internal_buffer_position] == 0 {
+            return Ok((0, 1));
         }
+        let length = 8 - self.buffer[self.internal_buffer_position].ilog2() as usize;
+        let mut val = self.buffer[self.internal_buffer_position] as u64;
+        for i in 1..length {
+            val <<= 8;
+            val += self.buffer[self.internal_buffer_position+i] as u64;
+        }
+        Ok((val, length))
     }
 
-    fn read_tag_size(&mut self) -> Result<Option<EBMLSize>, TagIteratorError> {
+    #[inline(always)]
+    fn read_tag_id(&mut self) -> Result<u64, TagIteratorError> {
+        let (id, len) = self.peek_tag_id()?;
+        self.internal_buffer_position += len;
+        Ok(id)
+    }
+
+    #[inline(always)]
+    fn read_tag_size(&mut self, data_type: Option<&TagDataType>) -> Result<Option<EBMLSize>, TagIteratorError> {
         self.ensure_data_read(8)?;
         match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
             Some((value, length)) => {
                 if length > self.buffered_byte_length {
                     Ok(None)
+                } else if value > 8 && matches!(data_type, Some(TagDataType::UnsignedInt) | Some(TagDataType::Integer) | Some(TagDataType::Float)) {
+                    Err(TagIteratorError::CorruptedFileData(format!("Tag size {value} is too large for a numeric tag type!")))
                 } else {
                     self.internal_buffer_position += length;
-                    Ok(Some(EBMLSize::new(value, length)))
+                    Ok(Some(EBMLSize::new(value, length)))                  
                 }
             },
             None => Ok(None)
@@ -221,25 +279,15 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     fn read_tag(&mut self) -> Result<ProcessingTag<TSpec>, TagIteratorError> {
         let tag_start = self.current_offset();
 
-        let tag_id = self.read_tag_id().and_then(|res| {
-            if let Some(res) = res {
-                Ok(res)
-            } else {
-                Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: None, tag_size: None, partial_data: None })
-            }
-        })?;
-        let size: EBMLSize = self.read_tag_size().and_then(|res| {
-            if let Some(res) = res {
-                Ok(res)
-            } else {
-                Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: None, partial_data: None })
-            }
-        })?;
-
+        let tag_id = self.read_tag_id()?;
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
-        let data_start = self.current_offset();
+        if !self.allow_unknown_ids && spec_tag_type.is_none() {
+            return Err(TagIteratorError::CorruptedFileData("Unknown tag ids are currently disabled.".into()));
+        }
 
-        let raw_data = if matches!(spec_tag_type, TagDataType::Master) {
+        let size: EBMLSize = self.read_tag_size(spec_tag_type.as_ref()).and_then(|res| res.ok_or(TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: None, partial_data: None }))?;
+        let data_start = self.current_offset();
+        let raw_data = if matches!(spec_tag_type, Some(TagDataType::Master)) {
             &[]
         } else if let Known(size) = size {
             self.read_tag_data(size).map_err(|err| {
@@ -254,28 +302,31 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         };
 
         let tag = match spec_tag_type {
-            TagDataType::Master => {
+            Some(TagDataType::Master) => {
                 TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was master, but could not get tag!", tag_id))
             },
-            TagDataType::UnsignedInt => {
+            Some(TagDataType::UnsignedInt) => {
                 let val = tools::arr_to_u64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                 TSpec::get_unsigned_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was unsigned int, but could not get tag!", tag_id))
             },
-            TagDataType::Integer => {
+            Some(TagDataType::Integer) => {
                 let val = tools::arr_to_i64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                 TSpec::get_signed_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was integer, but could not get tag!", tag_id))
             },
-            TagDataType::Utf8 => {
+            Some(TagDataType::Utf8) => {
                 let val = String::from_utf8(raw_data.to_vec()).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: ToolError::FromUtf8Error(raw_data.to_vec(), e) })?;
                 TSpec::get_utf8_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was utf8, but could not get tag!", tag_id))
             },
-            TagDataType::Binary => {
-                TSpec::get_binary_tag(tag_id, raw_data).unwrap_or_else(|| TSpec::get_raw_tag(tag_id, raw_data))
+            Some(TagDataType::Binary) => {
+                TSpec::get_binary_tag(tag_id, raw_data).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was binary, but could not get tag!", tag_id))
             },
-            TagDataType::Float => {
+            Some(TagDataType::Float) => {
                 let val = tools::arr_to_f64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                 TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was float, but could not get tag!", tag_id))
             },
+            None => {
+                TSpec::get_raw_tag(tag_id, raw_data)
+            }
         };
 
         Ok(ProcessingTag { tag, size, tag_start, data_start })

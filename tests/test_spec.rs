@@ -41,20 +41,22 @@ pub enum TestSpec {
     RawTag(u64, ::std::vec::Vec<u8>),
 }
 impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
-    fn get_tag_data_type(id: u64) -> ebml_iterable::specs::TagDataType {
+    fn get_tag_data_type(id: u64) -> Option<ebml_iterable::specs::TagDataType> {
         match id {
-            129u64 => TagDataType::Master,
-            16641u64 => TagDataType::UnsignedInt,
-            16642u64 => TagDataType::Utf8,
-            16643u64 => TagDataType::Master,
-            2163457u64 => TagDataType::UnsignedInt,
-            440786851u64 => TagDataType::Master,
-            408125543u64 => TagDataType::Master,
-            524531317u64 => TagDataType::Master,
-            151u64 => TagDataType::UnsignedInt,
-            16640u64 => TagDataType::UnsignedInt,
-            131u64 => TagDataType::UnsignedInt,
-            _ => ebml_iterable::specs::TagDataType::Binary,
+            129u64 => Some(TagDataType::Master),
+            16641u64 => Some(TagDataType::UnsignedInt),
+            16642u64 => Some(TagDataType::Utf8),
+            16643u64 => Some(TagDataType::Master),
+            2163457u64 => Some(TagDataType::UnsignedInt),
+            440786851u64 => Some(TagDataType::Master),
+            408125543u64 => Some(TagDataType::Master),
+            524531317u64 => Some(TagDataType::Master),
+            151u64 => Some(TagDataType::UnsignedInt),
+            16640u64 => Some(TagDataType::UnsignedInt),
+            131u64 => Some(TagDataType::UnsignedInt),
+            161u64 => Some(TagDataType::Binary),
+            163u64 => Some(TagDataType::Binary),
+            _ => None,
         }
     }
     fn get_unsigned_int_tag(id: u64, data: u64) -> Option<TestSpec> {

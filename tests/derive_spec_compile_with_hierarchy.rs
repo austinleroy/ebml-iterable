@@ -43,7 +43,7 @@ pub mod derive_spec_compile {
     #[test]
     pub fn compile_worked() {
         let data_type = Trial::get_tag_data_type(0x01);
-        assert_eq!(TagDataType::Master, data_type);
+        assert_eq!(Some(TagDataType::Master), data_type);
         
         let tag = Trial::get_master_tag(0x01, Master::Start).unwrap();
         assert_eq!(Trial::Root(Master::Start), tag);

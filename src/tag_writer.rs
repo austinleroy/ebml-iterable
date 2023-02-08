@@ -201,27 +201,27 @@ impl<W: Write> TagWriter<W>
     pub fn write<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<(), TagWriterError> {
         let tag_id = tag.get_id();
         match TSpec::get_tag_data_type(tag_id) {
-            TagDataType::UnsignedInt => {
+            Some(TagDataType::UnsignedInt) => {
                 let val = tag.as_unsigned_int().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was unsigned int, but could not get tag!", tag_id));
                 self.write_unsigned_int_tag(tag_id, val)?
             },
-            TagDataType::Integer => {
+            Some(TagDataType::Integer) => {
                 let val = tag.as_signed_int().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was integer, but could not get tag!", tag_id));
                 self.write_signed_int_tag(tag_id, val)?
             },
-            TagDataType::Utf8 => {
+            Some(TagDataType::Utf8) => {
                 let val = tag.as_utf8().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was utf8, but could not get tag!", tag_id));
                 self.write_utf8_tag(tag_id, val)?
             },
-            TagDataType::Binary => {
+            Some(TagDataType::Binary) => {
                 let val = tag.as_binary().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was binary, but could not get tag!", tag_id));
                 self.write_binary_tag(tag_id, val)?
             },
-            TagDataType::Float => {
+            Some(TagDataType::Float) => {
                 let val = tag.as_float().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id));
                 self.write_float_tag(tag_id, val)?
             },
-            TagDataType::Master => {
+            Some(TagDataType::Master) => {
                 let position = tag.as_master().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id));
 
                 match position {
@@ -235,6 +235,9 @@ impl<W: Write> TagWriter<W>
                         self.end_tag(tag_id)?;
                     }
                 }
+            },
+            None => {
+                panic!("Bad specification implementation: Tag id [{}] is in the spec, but has no data type!", tag_id);
             }
         }
 
@@ -258,7 +261,7 @@ impl<W: Write> TagWriter<W>
         let tag_id = tag.get_id();
         let tag_type = TSpec::get_tag_data_type(tag_id);
         match tag_type {
-            TagDataType::Master => {},
+            Some(TagDataType::Master) => {},
             _ => {
                 return Err(TagWriterError::TagSizeError(format!("Cannot write an unknown size for tag of type {tag_type:?}")))
             }

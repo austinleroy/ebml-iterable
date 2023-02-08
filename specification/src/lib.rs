@@ -39,9 +39,9 @@ pub trait EbmlSpecification<T: EbmlSpecification<T> + EbmlTag<T> + Clone> {
     ///
     /// Pulls the data type for a tag from the spec, based on the tag id.
     ///
-    /// This function *must* return [`TagDataType::Binary`] if the input id is not in the specification.  Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
+    /// This function *must* return [`None`] if the input id is not in the specification.  Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
-    fn get_tag_data_type(id: u64) -> TagDataType;
+    fn get_tag_data_type(id: u64) -> Option<TagDataType>;
 
     ///
     /// Gets the id of a specific tag variant.
