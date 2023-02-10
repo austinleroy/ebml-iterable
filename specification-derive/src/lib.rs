@@ -3,6 +3,7 @@ extern crate proc_macro;
 mod ast;
 mod attr;
 mod easy_ebml;
+mod pathing;
 
 use proc_macro::TokenStream;
 use syn::{ItemEnum, Error};
@@ -18,7 +19,7 @@ use crate::easy_ebml::EasyEBML;
 ///   * __#[data_type(`TagDataType`)]__ - This attribute specifies the type of data contained in the tag. e.g. `TagDataType::UnsignedInt`
 ///
 /// The following attribute is optional for each variant:
-///   * __#[parent(OtherVariantName)]__ - This attribute specifies the direct ancestor of the current element.  If this attribute is not present, the variant is treated as a Root element.
+///   * __#[doc_path(Path/To/Element)]__ - This attribute specifies the document path of the current element.  If this attribute is not present, the variant is treated as a Root element.  Global elements can be defined with wildcard paths, e.g. #[doc_path(Segment/(1-)/)].
 /// 
 /// # Note
 ///
@@ -56,6 +57,7 @@ pub fn ebml_specification(_args: TokenStream, input: TokenStream) -> TokenStream
 /// #    pub use ebml_iterable_specification::EbmlTag as EbmlTag;
 /// #    pub use ebml_iterable_specification::TagDataType as TagDataType;
 /// #    pub use ebml_iterable_specification::Master as Master;
+/// #    pub use ebml_iterable_specification::PathPart as PathPart;
 /// # }}
 /// #[ebml_specification]
 /// #[derive(Clone)]
@@ -66,12 +68,12 @@ pub fn ebml_specification(_args: TokenStream, input: TokenStream) -> TokenStream
 ///
 ///   #[id(0x02)]
 ///   #[data_type(Master)]
-///   #[parent(Root)]
+///   #[doc_path(Root)]
 ///   Parent,
 ///
 ///   #[id(0x100)]
 ///   #[data_type(UnsignedInt)]
-///   #[parent(Parent)]
+///   #[doc_path(Root/Parent)]
 ///   Data,
 /// }
 /// ```
@@ -86,6 +88,7 @@ pub fn ebml_specification(_args: TokenStream, input: TokenStream) -> TokenStream
 /// #    pub use ebml_iterable_specification::EbmlTag as EbmlTag;
 /// #    pub use ebml_iterable_specification::TagDataType as TagDataType;
 /// #    pub use ebml_iterable_specification::Master as Master;
+/// #    pub use ebml_iterable_specification::PathPart as PathPart;
 /// # }}
 /// easy_ebml! {
 ///   #[derive(Clone)]
@@ -112,9 +115,10 @@ pub fn easy_ebml(input: TokenStream) -> TokenStream {
                 Root: Type = id,\
                 Path/Of/Component: Type = id,\
                 // example\
-                Crc32: Binary = 0xbf,\
                 Ebml: Master = 0x1a45dfa3,\
                 Ebml/EbmlVersion: UnsignedInt = 0x4286,\
+                // global elements can be used in paths, example:\
+                (1-)/Crc32: Binary = 0xbf,\
             }").to_compile_error())
         },
     };

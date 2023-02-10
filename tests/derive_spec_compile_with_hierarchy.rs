@@ -11,33 +11,38 @@ pub mod derive_spec_compile {
 
         #[id(0x02)]
         #[data_type(TagDataType::Master)]
-        #[parent(Root)]
+        #[doc_path(Root)]
         Parent,
 
         #[id(0x100)]
         #[data_type(TagDataType::UnsignedInt)]
-        #[parent(Parent)]
+        #[doc_path(Root/Parent)]
         Count,
 
         #[id(0x200)]
         #[data_type(TagDataType::Binary)]
-        #[parent(Parent)]
+        #[doc_path(Root/Parent)]
         Data,
 
         #[id(0x201)]
         #[data_type(TagDataType::Utf8)]
-        #[parent(Parent)]
+        #[doc_path(Root/Parent)]
         Name,
 
         #[id(0x102)]
         #[data_type(TagDataType::Float)]
-        #[parent(Parent)]
+        #[doc_path(Root/Parent)]
         Amount,
 
         #[id(0x101)]
         #[data_type(TagDataType::Integer)]
-        #[parent(Parent)]
-        Id,  
+        #[doc_path(Root/Parent)]
+        Id,
+
+        #[id(0xec)]
+        #[data_type(TagDataType::Binary)]
+        #[doc_path((1-))]
+        Crc32,
     }
 
     #[test]

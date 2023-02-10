@@ -8,6 +8,7 @@ use ebml_iterable_specification::TagDataType;
 use ebml_iterable_specification::TagDataType::Master;
 
 use super::ast::Enum;
+use super::pathing::PathPart;
 
 pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
     let input = Enum::from_syn(original)?;
@@ -23,8 +24,8 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
 
     let map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
     for origin in &input.variants {
-        if origin.parent_attr.is_some() {
-            validate_parents(origin, &map)?;
+        if !matches!(origin.data_type_attr.0, TagDataType::Master) && origin.path_attr.is_some() {
+            validate_path(origin, &map)?;
         }
     }
 
@@ -38,26 +39,32 @@ pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
     ))
 }
 
-// detect circular hierarchy and verify all parents are Master type elements
-fn validate_parents(origin: &crate::ast::Variant, variants_map: &HashMap<&Ident, &crate::ast::Variant>) -> Result<()> {
-    let mut explored: HashMap<&Ident, &crate::ast::Variant> = HashMap::new();
-    explored.insert(&origin.ident, origin);
+// verify all parents are Master type elements and their path lines up with this item's path
+fn validate_path(origin: &crate::ast::Variant, variants_map: &HashMap<&Ident, &crate::ast::Variant>) -> Result<()> {
+    // Only validate the element if it has a path attribute
+    if let Some(path_parts) = origin.path_attr.as_ref().map(|(path, _)| &path.parts) {
+        // Only validate if there is a specific parent element
+        if let Some(parent) = path_parts.iter().rev().filter_map(|p| {
+            if let PathPart::Ident(ident) = p {
+                Some(ident)
+            } else {
+                None
+            }
+        }).nth(0) {
+            let parent = *variants_map.get(parent).unwrap();
+            if parent.data_type_attr.0 != Master {
+                return Err(Error::new_spanned(parent.original, "Parents must be of Master type"))
+            }
 
-    let mut variant = origin;
-    while let Some(parent) = variant.parent_attr.as_ref().map(|(id, _)| *variants_map.get(id).unwrap()) {
-        if parent.data_type_attr.0 != Master {
-            return Err(Error::new_spanned(parent.original, "Parents must be of Master type"))
+            if let Some((parent_path, _)) = parent.path_attr.as_ref() {
+                for i in 0..parent_path.parts.len() {
+                    if parent_path.parts[i] != path_parts[i] {
+                        return Err(Error::new_spanned(origin.original, format!("Path segment [{}] did not align with parent [{}] path.", path_parts[i], parent.ident)));
+                    }
+                }
+                validate_path(parent, variants_map)?;
+            }
         }
-
-        if explored.contains_key(&parent.ident) {
-            return Err(explored.into_values().map(|origin|Error::new_spanned(origin.original, format!("#[parent({})] chain is circular", origin.ident))).reduce(|mut a, b| {
-                a.combine(b);
-                a
-            }).unwrap());
-        }
-
-        explored.insert(&parent.ident, parent);
-        variant = parent;
     }
 
     Ok(())
@@ -92,7 +99,7 @@ fn modify_orig(original: &mut ItemEnum) -> Result<TokenStream> {
             return Err(Error::new_spanned(data_type_attribute.clone(), format!("unknown data_type \"{data_type}\"")));
         };
 
-        var.attrs.retain(|a| !(a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("parent")));
+        var.attrs.retain(|a| !(a.path.is_ident("id") || a.path.is_ident("data_type") || a.path.is_ident("doc_path")));
         var.fields = Fields::Unnamed(syn::parse2::<FieldsUnnamed>(data_type)?);
     }
     original.variants.push(syn::parse_str::<Variant>("RawTag(u64, ::std::vec::Vec<u8>)")?);
@@ -109,7 +116,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let id = &var.id_attr.0;
             let data_type = &var.data_type_attr.1;
 
-            quote! {
+            quote_spanned! { var.data_type_attr.2.original.span() =>
                 #id => Some(#data_type),
             }
         });
@@ -118,7 +125,7 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
         let name = &var.ident;
         let id = &var.id_attr.0;
 
-        quote! {
+        quote_spanned! { var.id_attr.1.original.span() =>
             #ty::#name(_) => #id,
         }
     });
@@ -129,27 +136,45 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
             let id = &var.id_attr.0;
             let ret_val = TokenStream::from_str(&ret_val).expect("Misuse of get_tag function in ebml_iterable_specification_derive_attr");
 
-            quote! {
+            quote_spanned! { var.original.span() =>
                 #id => Some(#ty::#name(#ret_val)),
             }
         }
     };
 
+    let path_part = spanned_path_part(input.original);
     let variant_map: HashMap<_, _> = input.variants.iter().map(|var|(&var.ident, var)).collect();
-    let get_parent_id = input.variants.iter().filter_map(|v| {
-        match v.parent_attr.as_ref() {
+    let get_path_by_id = input.variants.iter().filter_map(|v| {
+        match v.path_attr.as_ref() {
             None => None,
-            Some(parent) => {
-                let name = &v.ident;
-                let parent_id = variant_map.get(&parent.0).map(|v| v.id_attr.0);
+            Some(path) => {
+                let id = &v.id_attr.0;
+                let path_array: Vec<TokenStream> = path.0.parts.iter().map(|p| match p {
+                    PathPart::Ident(ident) => {
+                        let id = variant_map.get(&ident).map(|v| v.id_attr.0).unwrap();
+                        quote_spanned! { path.1.original.span() => #path_part::Id(#id) }
+                    },
+                    PathPart::Global((min, max)) => {
+                        let min_tokens = if let Some(min) = min {
+                            quote!{Some(#min)}
+                        } else {
+                            quote!{None}
+                        };
+                        let max_tokens = if let Some(max) = max {
+                            quote!{Some(#max)}
+                        } else {
+                            quote!{None}
+                        };
+                        quote_spanned! { path.1.original.span() => #path_part::Global((#min_tokens, #max_tokens)) }
+                    }
+                }).collect();
                 Some(
-                    quote! {
-                        #ty::#name(_) => Some(#parent_id),
+                    quote_spanned! { v.original.span() =>
+                        #id => &[#(#path_array),*],
                     }
                 )
             }
         }
-
     });
 
     let get_unsigned_int_tag = input.variants.iter()
@@ -222,6 +247,13 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
                 }
             }
 
+            fn get_path_by_id(id: u64) -> &'static [#path_part] {
+                match id {
+                    #(#get_path_by_id)*
+                    _ => &[]
+                }
+            }
+
             fn get_unsigned_int_tag(id: u64, data: u64) -> Option<#ty> {
                 match id {
                     #(#get_unsigned_int_tag)*
@@ -275,13 +307,6 @@ fn get_impl(input: Enum) -> Result<TokenStream> {
                 match self {
                     #(#get_id)*
                     #ty::RawTag(id, _data) => *id,
-                }
-            }
-
-            fn get_parent_id(&self) -> Option<u64> {
-                match self {
-                    #(#get_parent_id)*
-                    _ => None,
                 }
             }
 
@@ -368,6 +393,13 @@ fn spanned_tag_data_type(input: &ItemEnum) -> TokenStream {
     let path = spanned_ebml_iterable_specs(input);
     let last_span = input.ident.span();
     let r#type = quote_spanned!(last_span=> TagDataType);
+    quote!(#path #r#type)
+}
+
+fn spanned_path_part(input: &ItemEnum) -> TokenStream {
+    let path = spanned_ebml_iterable_specs(input);
+    let last_span = input.ident.span();
+    let r#type = quote_spanned!(last_span=> PathPart);
     quote!(#path #r#type)
 }
 

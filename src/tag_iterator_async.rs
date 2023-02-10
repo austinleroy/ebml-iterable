@@ -4,6 +4,7 @@ use std::mem;
 use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master, TagDataType};
 use futures::{AsyncRead, AsyncReadExt, Stream};
 use crate::error::{TagIteratorError, ToolError};
+use crate::errors::tag_iterator::CorruptedFileError;
 use crate::tag_iterator_util::{EBMLSize, ProcessingTag};
 use crate::tag_iterator_util::EBMLSize::Known;
 use crate::tools;
@@ -71,29 +72,29 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
 
     async fn read_tag_id(&mut self) -> Result<u64, TagIteratorError> {
         self.ensure_data_read(8).await?;
-        match tools::read_vint(&self.buf).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
+        match tools::read_vint(&self.buf).unwrap_or(Some((0, 1))) {
             Some((value, length)) => {
                 self.advance(length);
                 Ok(value + (1 << (7 * length)))
             },
-            None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag id, but reached end of source."))),
+            None => Err(TagIteratorError::UnexpectedEOF{ tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None }),
         }
     }
 
     async fn read_tag_size(&mut self) -> Result<EBMLSize, TagIteratorError> {
         self.ensure_data_read(8).await?;
-        match tools::read_vint(&self.buf).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
+        match tools::read_vint(&self.buf).or(Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData)))? {
             Some((value, length)) => {
                 self.advance(length);
                 Ok(EBMLSize::new(value, length))
             },
-            None => Err(TagIteratorError::CorruptedFileData(String::from("Expected tag size, but reached end of source."))),
+            None => Err(TagIteratorError::UnexpectedEOF{ tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None }),
         }
     }
 
     async fn read_tag_data(&mut self, size: usize) -> Result<Vec<u8>, TagIteratorError> {
         if !self.ensure_data_read(size).await? {
-            return Err(TagIteratorError::CorruptedFileData(String::from("reached end of file but expecting more data")));
+            return Err(TagIteratorError::UnexpectedEOF{ tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None });
         }
         Ok(self.advance_get(size))
     }
@@ -117,7 +118,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             let size = if let Known(size) = size {
                 size
             } else {
-                return Err(TagIteratorError::CorruptedFileData("Unknown size for primitive not allowed".into()));
+                return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData));
             };
             
             let raw_data = self.read_tag_data(size).await?;
@@ -147,13 +148,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             match self.tag_stack.last() {
                 None => Ok(tag),
                 Some(previous_tag) => {
-                    let previous_tag_ended = 
-                        previous_tag.is_parent(tag_id) ||
-                        previous_tag.is_sibling(&tag) ||
-                        (
-                            std::mem::discriminant(&tag) != std::mem::discriminant(&TSpec::get_raw_tag(tag_id, &[])) && 
-                            matches!(tag.get_parent_id(), None)
-                        );
+                    let previous_tag_ended = previous_tag.is_ended_by(&tag_id);
                         
                     if previous_tag_ended {
                         Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), data_start: current_offset, tag_start: 0 }).into_inner())

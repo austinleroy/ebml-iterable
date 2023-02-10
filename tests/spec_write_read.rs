@@ -12,10 +12,10 @@ pub mod spec_write_read {
     pub fn simple_read_write() {
         let tags: Vec<TestSpec> = vec![
             TestSpec::Ebml(Master::Start),
+            TestSpec::Ebml(Master::End),
             TestSpec::Segment(Master::Start),
             TestSpec::TrackType(0x01),
             TestSpec::Segment(Master::End),
-            TestSpec::Ebml(Master::End),
         ];
 
         let mut dest = Cursor::new(Vec::new());
@@ -41,9 +41,9 @@ pub mod spec_write_read {
     #[test]
     pub fn read_write_buffered_tag() {
         let tags: Vec<TestSpec> = vec![
-            TestSpec::Ebml(Master::Start),
+            TestSpec::Segment(Master::Start),
             TestSpec::Cluster(Master::Full(vec![TestSpec::CueRefCluster(0x02)])),
-            TestSpec::Ebml(Master::End),
+            TestSpec::Segment(Master::End),
         ];
 
         let mut dest = Cursor::new(Vec::new());
@@ -57,7 +57,9 @@ pub mod spec_write_read {
 
         let mut src = Cursor::new(dest.get_ref().to_vec());
         let reader = TagIterator::new(&mut src, &[TestSpec::Cluster(Master::Start)]);
-        let read_tags: Vec<TestSpec> = reader.into_iter().map(|t| t.unwrap()).collect();
+        let read_tags: Vec<TestSpec> = reader.into_iter().map(|t| 
+            t.unwrap()
+        ).collect();
 
         println!("tags {:?}", read_tags);
 
@@ -142,6 +144,7 @@ pub mod spec_write_read {
         writer.write(&TestSpec::Int(2)).unwrap();
         writer.write(&TestSpec::Root(Master::End)).unwrap();
 
+        println!("{dest:x?}");
         dest.set_position(0);
         
         let mut iter = TagIterator::<_, TestSpec>::new(dest, &[]);
@@ -158,14 +161,14 @@ pub mod spec_write_read {
     #[test]
     pub fn eof_error_is_helpful() {
         let tags: Vec<TestSpec> = vec![
-            TestSpec::Ebml(Master::Start),
             TestSpec::Segment(Master::Start),
             TestSpec::TrackType(0x01),
-            TestSpec::Child(3),
-            TestSpec::Int(1),
+            TestSpec::Cluster(Master::Start),
+            TestSpec::CueRefCluster(3),
+            TestSpec::Count(1),
             TestSpec::Block(vec![0, 1, 2, 3, 4, 5, 6, 7, 8]),
+            TestSpec::Cluster(Master::End),
             TestSpec::Segment(Master::End),
-            TestSpec::Ebml(Master::End),
         ];
 
         let mut dest = Cursor::new(Vec::new());
@@ -175,7 +178,7 @@ pub mod spec_write_read {
             writer.write(tag).expect("Test shouldn't error");
         }
 
-        println!("dest {:?}", dest);
+        println!("dest {:x?}", dest);
 
         let mut src = Cursor::new(dest.get_ref()[0..26].to_vec());
         let reader = TagIterator::new(&mut src, &[]);
@@ -185,11 +188,41 @@ pub mod spec_write_read {
         
         match err.expect_err("Should be an error") {
             TagIteratorError::UnexpectedEOF { tag_start, tag_id, tag_size, partial_data: _ } => {
-                assert_eq!(tag_start, 22);
+                assert_eq!(tag_start, 20);
                 assert_eq!(tag_id, Some(TestSpec::Block(vec![]).get_id()));
                 assert_eq!(tag_size, Some(9));
             },
-            _ => assert!(false)
+            other => {
+                println!("{other:?}");
+                assert!(false);
+            }
         }
+    }
+
+    #[test]
+    pub fn allow_start_reading_not_at_root() {
+        let tags: Vec<TestSpec> = vec![
+            TestSpec::Segment(Master::Start),
+            TestSpec::TrackType(0x01),
+            TestSpec::Cluster(Master::Start),
+            TestSpec::CueRefCluster(3),
+            TestSpec::Count(1),
+            TestSpec::Block(vec![0, 1, 2, 3, 4, 5, 6, 7, 8]),
+            TestSpec::Cluster(Master::End),
+            TestSpec::Segment(Master::End),
+        ];
+
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        for tag in tags.iter() {
+            writer.write(tag).expect("Test shouldn't error");
+        }
+
+        println!("dest {:x?}", dest);
+
+        let mut src = Cursor::new(dest.get_ref()[8..].to_vec());
+        let reader: TagIterator<_, TestSpec> = TagIterator::new(&mut src, &[]);
+        reader.for_each(|t| assert!(t.is_ok()));
     }
 }

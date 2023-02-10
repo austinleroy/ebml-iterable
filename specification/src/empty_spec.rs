@@ -1,4 +1,4 @@
-use super::{EbmlSpecification, EbmlTag, Master, TagDataType};
+use super::{EbmlSpecification, EbmlTag, Master, TagDataType, PathPart};
 
 ///
 /// An empty specification for use with examples or testing.
@@ -27,6 +27,10 @@ impl EmptySpec {
 impl EbmlSpecification<EmptySpec> for EmptySpec {
     fn get_tag_data_type(_id: u64) -> Option<TagDataType> {
         Some(TagDataType::Binary)
+    }
+
+    fn get_path_by_id(_id: u64) -> &'static [PathPart] {
+        &[]
     }
 
     fn get_unsigned_int_tag(_id: u64, _data: u64) -> Option<EmptySpec> {
@@ -70,10 +74,6 @@ impl EbmlTag<EmptySpec> for EmptySpec {
 
     fn get_id(&self) -> u64 { 
         self.id
-    }
-
-    fn get_parent_id(&self) -> Option<u64> {
-        None
     }
 
     fn as_unsigned_int(&self) -> Option<&u64> {

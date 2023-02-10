@@ -3,7 +3,7 @@ use std::convert::{TryInto, TryFrom};
 
 use super::tag_iterator_util::EBMLSize::{self, Known, Unknown};
 
-use super::tools::Vint;
+use super::tools::{Vint, is_vint};
 use super::specs::{EbmlSpecification, EbmlTag, TagDataType, Master};
 
 use super::errors::tag_writer::TagWriterError;
@@ -236,8 +236,13 @@ impl<W: Write> TagWriter<W>
                     }
                 }
             },
-            None => {
-                panic!("Bad specification implementation: Tag id [{}] is in the spec, but has no data type!", tag_id);
+            None => { // Should be a "raw tag"
+                if !is_vint(tag_id) {
+                    return Err(TagWriterError::TagIdError(tag_id));
+                } else {
+                    let val = tag.as_binary().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was raw tag, but could not get binary data!", tag_id));
+                    self.write_binary_tag(tag_id, val)?
+                }
             }
         }
 

@@ -1,4 +1,4 @@
-use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master};
+use ebml_iterable_specification::{EbmlSpecification, EbmlTag, PathPart};
 use std::convert::TryInto;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 
@@ -44,20 +44,43 @@ impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag
         self.tag
     }
 
-    pub fn is_parent(&self, id: u64) -> bool {
-        let mut parent_id_opt = self.tag.get_parent_id();
-        while let Some(parent_id) = parent_id_opt {
-            if parent_id == id {
-                return true;
-            }
-            parent_id_opt = TSpec::get_master_tag(parent_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: parent id {} type was not master!!", parent_id)).get_parent_id();
-        }
-        false
+    fn is_parent(&self, id: &u64) -> bool {
+        let path = <TSpec>::get_path_by_tag(&self.tag);
+        path.iter().any(|p| matches!(p, PathPart::Id(p) if p == id))
     }
 
-    pub fn is_sibling(&self, compare: &TSpec) -> bool {
-        self.tag.get_parent_id() == compare.get_parent_id()
+    fn is_sibling(&self, compare: &u64) -> bool {
+        <TSpec>::get_path_by_tag(&self.tag) == <TSpec>::get_path_by_id(*compare)
+    }
+
+    pub fn is_ended_by(&self, id: &u64) -> bool {
+        // Unknown sized tags can be ended if we reach an element that is:
+        //  - A parent of the tag
+        //  - A direct sibling of the tag
+        //  - A Root element
+
+        self.is_parent(id) || // parent
+            self.is_sibling(id) || // sibling
+            ( // Root element
+                <TSpec>::get_tag_data_type(*id).is_some() && 
+                <TSpec>::get_path_by_id(*id).is_empty()
+            )
     }
 }
 
 pub const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
+
+///
+/// Used to relax rules on how strictly a [`TagIterator`](ebml_iterable::TagIterator) should validate the read stream.
+/// 
+pub enum AllowableErrors {
+    ///
+    /// Causes the [`TagIterator`](ebml_iterable::TagIterator) to produce "RawTag" binary variants for any unknown tag ids rather than throwing an error.
+    /// 
+    InvalidTagIds,
+
+    ///
+    /// Causes the [`TagIterator`](ebml_iterable::TagIterator) to emit tags even if they appear outside of their defined parent element.
+    /// 
+    HierarchyProblems,
+}

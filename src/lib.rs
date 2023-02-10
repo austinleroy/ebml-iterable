@@ -35,12 +35,17 @@ pub use self::tag_iterator::TagIterator;
 pub use self::tag_iterator_async::TagIteratorAsync;
 pub use self::tag_writer::TagWriter;
 
+pub mod iterator {
+    pub use super::tag_iterator_util::AllowableErrors;
+}
+
 pub mod error {
 
     //!
     //! Potential errors that can occur when reading or writing EBML data.
     //!
     pub use super::errors::tag_iterator::TagIteratorError;
+    pub use super::errors::tag_iterator::CorruptedFileError;
     pub use super::errors::tag_writer::TagWriterError;
 
     ///
