@@ -7,14 +7,14 @@
 //         Root/Parent      : Master = 0x4103,
 //         Root/Parent/Child: UnsignedInt = 0x210301,
 
-//         Ebml             : Master = 0x1a45dfa3,
-//         Segment          : Master = 0x18538067,
-//         Cluster          : Master = 0x1F43B675,
-//         CueRefCluster    : UnsignedInt = 0x97,
-//         Count            : UnsignedInt = 0x4100,
-//         TrackType        : UnsignedInt = 0x83,
-//         Block            : Binary = 0xa1,
-//         SimpleBlock      : Binary = 0xa3,
+//         Ebml                             : Master = 0x1a45dfa3,
+//         Segment                          : Master = 0x18538067,
+//         Segment/TrackType                : UnsignedInt = 0x83,
+//         Segment/Cluster                  : Master = 0x1F43B675,
+//         Segment/Cluster/CueRefCluster    : UnsignedInt = 0x97,
+//         Segment/Cluster/Count            : UnsignedInt = 0x4100,
+//         Segment/Cluster/Block            : Binary = 0xa1,
+//         Segment/Cluster/SimpleBlock      : Binary = 0xa3,
 //     }
 // )
 
@@ -32,38 +32,76 @@ pub enum TestSpec {
     Child(u64),
     Ebml(ebml_iterable::specs::Master<TestSpec>),
     Segment(ebml_iterable::specs::Master<TestSpec>),
+    TrackType(u64),
     Cluster(ebml_iterable::specs::Master<TestSpec>),
     CueRefCluster(u64),
     Count(u64),
-    TrackType(u64),
     Block(::std::vec::Vec<u8>),
     SimpleBlock(::std::vec::Vec<u8>),
+    Crc32(::std::vec::Vec<u8>),
+    Void(::std::vec::Vec<u8>),
     RawTag(u64, ::std::vec::Vec<u8>),
 }
 impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
-    fn get_tag_data_type(id: u64) -> ebml_iterable::specs::TagDataType {
+    fn get_tag_data_type(id: u64) -> Option<ebml_iterable::specs::TagDataType> {
         match id {
-            129u64 => TagDataType::Master,
-            16641u64 => TagDataType::UnsignedInt,
-            16642u64 => TagDataType::Utf8,
-            16643u64 => TagDataType::Master,
-            2163457u64 => TagDataType::UnsignedInt,
-            440786851u64 => TagDataType::Master,
-            408125543u64 => TagDataType::Master,
-            524531317u64 => TagDataType::Master,
-            151u64 => TagDataType::UnsignedInt,
-            16640u64 => TagDataType::UnsignedInt,
-            131u64 => TagDataType::UnsignedInt,
-            _ => ebml_iterable::specs::TagDataType::Binary,
+            129u64 => Some(TagDataType::Master),
+            16641u64 => Some(TagDataType::UnsignedInt),
+            16642u64 => Some(TagDataType::Utf8),
+            16643u64 => Some(TagDataType::Master),
+            2163457u64 => Some(TagDataType::UnsignedInt),
+            440786851u64 => Some(TagDataType::Master),
+            408125543u64 => Some(TagDataType::Master),
+            131u64 => Some(TagDataType::UnsignedInt),
+            524531317u64 => Some(TagDataType::Master),
+            151u64 => Some(TagDataType::UnsignedInt),
+            16640u64 => Some(TagDataType::UnsignedInt),
+            161u64 => Some(TagDataType::Binary),
+            163u64 => Some(TagDataType::Binary),
+            191u64 => Some(ebml_iterable::specs::TagDataType::Binary),
+            236u64 => Some(ebml_iterable::specs::TagDataType::Binary),
+            _ => None,
+        }
+    }
+    fn get_path_by_id(id: u64) -> &'static [ebml_iterable::specs::PathPart] {
+        match id {
+            16641u64 => &[ebml_iterable::specs::PathPart::Id(129u64)],
+            16642u64 => &[ebml_iterable::specs::PathPart::Id(129u64)],
+            16643u64 => &[ebml_iterable::specs::PathPart::Id(129u64)],
+            2163457u64 => &[
+                ebml_iterable::specs::PathPart::Id(129u64),
+                ebml_iterable::specs::PathPart::Id(16643u64),
+            ],
+            131u64 => &[ebml_iterable::specs::PathPart::Id(408125543u64)],
+            524531317u64 => &[ebml_iterable::specs::PathPart::Id(408125543u64)],
+            151u64 => &[
+                ebml_iterable::specs::PathPart::Id(408125543u64),
+                ebml_iterable::specs::PathPart::Id(524531317u64),
+            ],
+            16640u64 => &[
+                ebml_iterable::specs::PathPart::Id(408125543u64),
+                ebml_iterable::specs::PathPart::Id(524531317u64),
+            ],
+            161u64 => &[
+                ebml_iterable::specs::PathPart::Id(408125543u64),
+                ebml_iterable::specs::PathPart::Id(524531317u64),
+            ],
+            163u64 => &[
+                ebml_iterable::specs::PathPart::Id(408125543u64),
+                ebml_iterable::specs::PathPart::Id(524531317u64),
+            ],
+            191u64 => &[ebml_iterable::specs::PathPart::Global((Some(1u64), None))],
+            236u64 => &[ebml_iterable::specs::PathPart::Global((None, None))],
+            _ => &[],
         }
     }
     fn get_unsigned_int_tag(id: u64, data: u64) -> Option<TestSpec> {
         match id {
             16641u64 => Some(TestSpec::Int(data)),
             2163457u64 => Some(TestSpec::Child(data)),
+            131u64 => Some(TestSpec::TrackType(data)),
             151u64 => Some(TestSpec::CueRefCluster(data)),
             16640u64 => Some(TestSpec::Count(data)),
-            131u64 => Some(TestSpec::TrackType(data)),
             _ => None,
         }
     }
@@ -82,6 +120,8 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
         match id {
             161u64 => Some(TestSpec::Block(data.to_vec())),
             163u64 => Some(TestSpec::SimpleBlock(data.to_vec())),
+            191u64 => Some(TestSpec::Crc32(data.to_vec())),
+            236u64 => Some(TestSpec::Void(data.to_vec())),
             _ => None,
         }
     }
@@ -114,31 +154,24 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
             TestSpec::Child(_) => 2163457u64,
             TestSpec::Ebml(_) => 440786851u64,
             TestSpec::Segment(_) => 408125543u64,
+            TestSpec::TrackType(_) => 131u64,
             TestSpec::Cluster(_) => 524531317u64,
             TestSpec::CueRefCluster(_) => 151u64,
             TestSpec::Count(_) => 16640u64,
-            TestSpec::TrackType(_) => 131u64,
             TestSpec::Block(_) => 161u64,
             TestSpec::SimpleBlock(_) => 163u64,
+            TestSpec::Crc32(_) => 191u64,
+            TestSpec::Void(_) => 236u64,
             TestSpec::RawTag(id, _data) => *id,
-        }
-    }
-    fn get_parent_id(&self) -> Option<u64> {
-        match self {
-            TestSpec::Int(_) => Some(129u64),
-            TestSpec::String(_) => Some(129u64),
-            TestSpec::Parent(_) => Some(129u64),
-            TestSpec::Child(_) => Some(16643u64),
-            _ => None,
         }
     }
     fn as_unsigned_int(&self) -> Option<&u64> {
         match self {
             TestSpec::Int(val) => Some(val),
             TestSpec::Child(val) => Some(val),
+            TestSpec::TrackType(val) => Some(val),
             TestSpec::CueRefCluster(val) => Some(val),
             TestSpec::Count(val) => Some(val),
-            TestSpec::TrackType(val) => Some(val),
             _ => None,
         }
     }
@@ -157,6 +190,8 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
         match self {
             TestSpec::Block(val) => Some(val),
             TestSpec::SimpleBlock(val) => Some(val),
+            TestSpec::Crc32(val) => Some(val),
+            TestSpec::Void(val) => Some(val),
             TestSpec::RawTag(_id, data) => Some(data),
             _ => None,
         }

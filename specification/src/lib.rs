@@ -27,6 +27,12 @@ pub enum TagDataType {
     Float,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum PathPart {
+    Id(u64),
+    Global((Option<u64>,Option<u64>)),
+}
+
 ///
 /// This trait, along with [`EbmlTag`], should be implemented to define a specification so that EBML can be parsed correctly.  Typically implemented on an Enum of tag variants.
 ///
@@ -39,9 +45,9 @@ pub trait EbmlSpecification<T: EbmlSpecification<T> + EbmlTag<T> + Clone> {
     ///
     /// Pulls the data type for a tag from the spec, based on the tag id.
     ///
-    /// This function *must* return [`TagDataType::Binary`] if the input id is not in the specification.  Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
+    /// This function *must* return [`None`] if the input id is not in the specification.  Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
-    fn get_tag_data_type(id: u64) -> TagDataType;
+    fn get_tag_data_type(id: u64) -> Option<TagDataType>;
 
     ///
     /// Gets the id of a specific tag variant.
@@ -50,6 +56,22 @@ pub trait EbmlSpecification<T: EbmlSpecification<T> + EbmlTag<T> + Clone> {
     ///
     fn get_tag_id(item: &T) -> u64 {
         item.get_id()
+    }
+
+    ///
+    /// Gets the schema path of a specific tag.
+    /// 
+    /// This function is used to find the schema defined path of a tag.  If the tag is a root element, this function should return an empty array.
+    /// 
+    fn get_path_by_id(id: u64) -> &'static [PathPart];
+
+    ///
+    /// Gets the schema path of a specific tag variant.
+    /// 
+    /// Default implementation uses [`Self::get_path_by_id`] after obtaining the tag id using the [`EbmlTag`] implementation.
+    /// 
+    fn get_path_by_tag(item: &T) -> &'static [PathPart] {
+        Self::get_path_by_id(item.get_id())
     }
 
     ///
@@ -118,13 +140,6 @@ pub trait EbmlTag<T: Clone> {
     /// Implementors can reference [webm-iterable](https://crates.io/crates/webm_iterable) for an example.
     ///
     fn get_id(&self) -> u64;
-
-    ///
-    /// Gets the id of the parent of `self`, if any.
-    /// 
-    /// This function is used to find the id of the direct ancestor of the current tag.  If the current tag is a root element, this function should return `None`.
-    /// 
-    fn get_parent_id(&self) -> Option<u64>;
 
     ///
     /// Gets a reference to the data contained in `self` as an unsigned integer.

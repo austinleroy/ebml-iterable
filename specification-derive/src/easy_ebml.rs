@@ -4,8 +4,9 @@ use syn::parse::{ParseBuffer, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::Result;
 use syn::Error;
-use quote::{quote};
-use syn::spanned::Spanned;
+use quote::quote;
+
+use crate::pathing::{EBMLPath, PathPart};
 
 pub struct EasyEBML {
     attrs: Vec<Attribute>,
@@ -50,15 +51,20 @@ impl EasyEBML {
 }
 
 pub struct EasyEBMLVariant {
-    path: Punctuated<Ident, Token![/]>,
+    path: EBMLPath,
     ty: Ident,
     id: LitInt
 }
 
 impl EasyEBMLVariant {
     pub fn into_variant(self) -> Result<Variant> {
-        let EasyEBMLVariant { mut path, ty, id } = self;
-        let ident = path.pop().ok_or_else(|| Error::new(path.span(), "easy_ebml enum variant must be at least: `Name: Type = id`"))?.into_value();
+        let EasyEBMLVariant { path, ty, id } = self;
+        let span = path.span;
+        let mut path: Vec<PathPart> = path.parts.into_iter().collect();
+        let ident: Ident = match path.pop().ok_or_else(|| Error::new(span, "easy_ebml enum variant must be at least: `Name: Type = id`"))? {
+            PathPart::Ident(id) => Ok(id),
+            PathPart::Global(_) => Err(Error::new(span, "easy_ebml enum variant cannot end in global path")),
+        }?;
         let mut attrs = vec![];
         attrs.push(Attribute {
             pound_token: Default::default(),
@@ -75,14 +81,17 @@ impl EasyEBMLVariant {
             tokens: quote!((TagDataType::#ty))
         });
 
-        if let Some(it) = path.pop() {
-            let it = it.into_value();
+        if !path.is_empty() {
+            let mut tokens: Punctuated<PathPart, Token![/]> = Punctuated::new();
+            for part in path {
+                tokens.push(part);
+            }
             attrs.push(Attribute {
                 pound_token: Default::default(),
                 style: AttrStyle::Outer,
                 bracket_token: Default::default(),
-                path: Ident::new("parent", proc_macro2::Span::call_site()).into(),
-                tokens: quote!((#it))
+                path: Ident::new("doc_path", proc_macro2::Span::call_site()).into(),
+                tokens: quote!((#tokens))
             });
         }
 
@@ -97,7 +106,7 @@ impl EasyEBMLVariant {
 
 impl Parse for EasyEBMLVariant {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let path = Punctuated::parse_separated_nonempty(input)?;
+        let path = input.parse()?;
         input.parse::<Token![:]>()?;
         let ty: Ident = input.parse()?;
         input.parse::<Token![=]>()?;

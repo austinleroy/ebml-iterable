@@ -107,6 +107,14 @@ pub fn read_vint(buffer: &[u8]) -> Result<Option<(u64, usize)>, ToolError> {
     Ok(Some((value, length)))
 }
 
+pub fn is_vint(val: u64) -> bool {
+    if val == 0 {
+        return false;
+    }
+
+    (val.ilog2() % 7) == 0
+}
+
 ///
 /// Trait to enable easy serialization to a signed vint.
 /// 
@@ -455,5 +463,50 @@ mod tests {
             let neg_result = arr_to_i64(&(buffer.iter().map(|b| !b).collect::<Vec<u8>>())).unwrap() + 1;
             assert_eq!(-expected, neg_result);
         }
+    }
+
+    #[test]
+    fn valid_vints() {
+        assert!(is_vint(0x1F43B675));
+        assert!(is_vint(0xA0));
+        assert!(is_vint(0xA1));
+        assert!(is_vint(0x75A1));
+        assert!(is_vint(0xA6));
+        assert!(is_vint(0xEE));
+        assert!(is_vint(0xA5));
+        assert!(is_vint(0x9B));
+        assert!(is_vint(0xA2));
+        assert!(is_vint(0xA4));
+        assert!(is_vint(0x75A2));
+        assert!(is_vint(0xFB));
+        assert!(is_vint(0xC8));
+        assert!(is_vint(0xC9));
+        assert!(is_vint(0xCA));
+        assert!(is_vint(0xFA));
+        assert!(is_vint(0xFD));
+        assert!(is_vint(0x8E));
+        assert!(is_vint(0xE8));
+        assert!(is_vint(0xCB));
+        assert!(is_vint(0xCE));
+        assert!(is_vint(0xCD));
+        assert!(is_vint(0xCC));
+        assert!(is_vint(0xCF));
+        assert!(is_vint(0xAF));
+        assert!(is_vint(0xA7));
+        assert!(is_vint(0xAB));
+        assert!(is_vint(0x5854));
+        assert!(is_vint(0x58D7));
+        assert!(is_vint(0xA3));
+        assert!(is_vint(0xE7));
+        assert!(is_vint(0x3E83BB));
+        assert!(is_vint(0x3EB923));
+        assert!(is_vint(0x3C83AB));
+        assert!(is_vint(0x3CB923));
+
+        assert!(!is_vint(1234));
+        assert!(!is_vint(0x11));
+        assert!(!is_vint(0x7a));
+        assert!(!is_vint(0xfa4c));
+        assert!(!is_vint(0x1a5d));
     }
 }

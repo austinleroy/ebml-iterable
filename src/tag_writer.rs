@@ -1,9 +1,11 @@
 use std::io::Write;
 use std::convert::{TryInto, TryFrom};
 
+use crate::spec_util::validate_tag_path;
+
 use super::tag_iterator_util::EBMLSize::{self, Known, Unknown};
 
-use super::tools::Vint;
+use super::tools::{Vint, is_vint};
 use super::specs::{EbmlSpecification, EbmlTag, TagDataType, Master};
 
 use super::errors::tag_writer::TagWriterError;
@@ -200,28 +202,35 @@ impl<W: Write> TagWriter<W>
     ///
     pub fn write<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<(), TagWriterError> {
         let tag_id = tag.get_id();
-        match TSpec::get_tag_data_type(tag_id) {
-            TagDataType::UnsignedInt => {
+        let tag_type = TSpec::get_tag_data_type(tag_id);
+
+        let should_validate = tag_type.is_some() && (!matches!(tag_type, Some(TagDataType::Master)) || !matches!(tag.as_master().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)), Master::End));
+        if should_validate && !validate_tag_path::<TSpec>(tag.get_id(), self.open_tags.iter().copied()) {
+            return Err(TagWriterError::UnexpectedTag { tag_id: tag.get_id(), current_path: self.open_tags.iter().map(|t| t.0).collect() });
+        }
+
+        match tag_type {
+            Some(TagDataType::UnsignedInt) => {
                 let val = tag.as_unsigned_int().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was unsigned int, but could not get tag!", tag_id));
                 self.write_unsigned_int_tag(tag_id, val)?
             },
-            TagDataType::Integer => {
+            Some(TagDataType::Integer) => {
                 let val = tag.as_signed_int().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was integer, but could not get tag!", tag_id));
                 self.write_signed_int_tag(tag_id, val)?
             },
-            TagDataType::Utf8 => {
+            Some(TagDataType::Utf8) => {
                 let val = tag.as_utf8().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was utf8, but could not get tag!", tag_id));
                 self.write_utf8_tag(tag_id, val)?
             },
-            TagDataType::Binary => {
+            Some(TagDataType::Binary) => {
                 let val = tag.as_binary().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was binary, but could not get tag!", tag_id));
                 self.write_binary_tag(tag_id, val)?
             },
-            TagDataType::Float => {
+            Some(TagDataType::Float) => {
                 let val = tag.as_float().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id));
                 self.write_float_tag(tag_id, val)?
             },
-            TagDataType::Master => {
+            Some(TagDataType::Master) => {
                 let position = tag.as_master().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id));
 
                 match position {
@@ -234,6 +243,14 @@ impl<W: Write> TagWriter<W>
                         }
                         self.end_tag(tag_id)?;
                     }
+                }
+            },
+            None => { // Should be a "raw tag"
+                if !is_vint(tag_id) {
+                    return Err(TagWriterError::TagIdError(tag_id));
+                } else {
+                    let val = tag.as_binary().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was raw tag, but could not get binary data!", tag_id));
+                    self.write_binary_tag(tag_id, val)?
                 }
             }
         }
@@ -258,7 +275,7 @@ impl<W: Write> TagWriter<W>
         let tag_id = tag.get_id();
         let tag_type = TSpec::get_tag_data_type(tag_id);
         match tag_type {
-            TagDataType::Master => {},
+            Some(TagDataType::Master) => {},
             _ => {
                 return Err(TagWriterError::TagSizeError(format!("Cannot write an unknown size for tag of type {tag_type:?}")))
             }

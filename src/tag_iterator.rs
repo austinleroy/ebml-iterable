@@ -1,13 +1,18 @@
 use std::io::Read;
 use std::collections::{HashSet, VecDeque};
 
+use crate::spec_util::validate_tag_path;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
-use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag};
+use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag, AllowableErrors};
 
 use super::tools;
-use super::specs::{EbmlSpecification, EbmlTag, Master, TagDataType};
-use super::errors::tag_iterator::TagIteratorError;
+use super::specs::{EbmlSpecification, EbmlTag, Master, TagDataType, PathPart};
+use super::errors::tag_iterator::{CorruptedFileError, TagIteratorError};
 use super::errors::tool::ToolError;
+
+const INVALID_TAG_ID_ERROR         : u8 = 0x01;
+const INVALID_HIERARCHY_ERROR      : u8 = 0x02;
+const OVERSIZED_CHILD_ERROR        : u8 = 0x04;
 
 ///
 /// Provides an iterator over EBML files (read from a source implementing the [`std::io::Read`] trait). Can be configured to read specific "Master" tags as complete objects rather than just emitting when they start and end.
@@ -50,6 +55,7 @@ pub struct TagIterator<R: Read, TSpec>
 {
     source: R,
     tag_ids_to_buffer: HashSet<u64>,
+    allowed_errors: u8,
 
     buffer: Box<[u8]>,
     buffer_offset: Option<usize>,
@@ -58,6 +64,7 @@ pub struct TagIterator<R: Read, TSpec>
     tag_stack: Vec<ProcessingTag<TSpec>>,
     emission_queue: VecDeque<Result<(TSpec, usize), TagIteratorError>>,
     last_emitted_tag_offset: usize,
+    has_determined_doc_path: bool,
 }
 
 impl<R: Read, TSpec> TagIterator<R, TSpec>
@@ -85,6 +92,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         TagIterator {
             source,
             tag_ids_to_buffer: tags_to_buffer.iter().map(|tag| tag.get_id()).collect(),
+            allowed_errors: 0,
             buffer: buffer.into_boxed_slice(),
             buffered_byte_length: 0,
             buffer_offset: None,
@@ -92,7 +100,58 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             tag_stack: Vec::new(),
             emission_queue: VecDeque::new(),
             last_emitted_tag_offset: 0,
+            has_determined_doc_path: false,
         }
+    }
+
+    ///
+    /// Configures how strictly the iterator abides `<TSpec>`.
+    /// 
+    /// By default (as of v0.5.0), the iterator assumes `<TSpec>` is complete and that any tags that do not conform to `<TSpec>` are due to corrupted file data.  This method can be used to relax some of these checks so that fewer [`TagIteratorError::CorruptedFileData`] errors occur.
+    /// 
+    /// # Important
+    /// 
+    /// Relaxing these checks do not necessarily make the iterator more robust.  If all errors are allowed, the iterator will assume any incoming tag id and tag data size are valid, and it will produce "RawTag"s containing binary contents for any tag ids not in `<TSpec>`.  However, if the file truly has corrupted data, the "size" of these elements will likely be corrupt as well.  This can typically result in requests for massive allocations, causing delays and eventual crashing.  By eagerly returning errors (the default), applications can decide how to handle corrupted elements more quickly and efficiently.
+    /// 
+    /// tldr; allow errors at your own risk
+    /// 
+    /// > Note: TagIterators returned by [`Self::new()`] and [`Self::with_capacity()`] allow no errors by default.
+    /// 
+    pub fn allow_errors(&mut self, errors: &[AllowableErrors]) {
+        self.allowed_errors = errors.iter().fold(0u8, |a, c| match c {
+            AllowableErrors::InvalidTagIds => a | INVALID_TAG_ID_ERROR ,
+            AllowableErrors::HierarchyProblems => a | INVALID_HIERARCHY_ERROR,
+            AllowableErrors::OversizedTags => a | OVERSIZED_CHILD_ERROR,
+        });
+    }
+
+    ///
+    /// Instructs the iterator to attempt to recover after reaching corrupted file data.
+    /// 
+    /// This method can be used to skip over corrupted sections of a read stream without recreating a new iterator.  The iterator will seek forward from its current internal position until it reaches either a valid EBML tag id or EOF.  After recovery, [`Iterator::next()`] *should* return an [`Ok`] result.
+    /// 
+    pub fn try_recover(&mut self) -> Result<(), TagIteratorError> {
+        let original_position = self.current_offset();        
+        loop {
+            if !self.ensure_data_read(1)? {
+                return Err(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None });
+            }
+
+            self.internal_buffer_position += 1;
+            if self.peek_valid_tag_header().is_ok() {
+                break;
+            }
+        }
+
+        // As part of recovery, update internal tag stack sizes so that we don't get "oversized children" errors after skipping corrupted data
+        let diff = self.current_offset() - original_position;
+        for tag in self.tag_stack.iter_mut() {
+            if let EBMLSize::Known(size) = &tag.size {
+                tag.size = EBMLSize::Known(size + diff);
+            }
+        }
+
+        Ok(())
     }
 
     ///
@@ -131,6 +190,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         self.last_emitted_tag_offset
     }
 
+    #[inline(always)]
     fn current_offset(&self) -> usize {
         self.buffer_offset.unwrap_or(0) + self.internal_buffer_position
     }
@@ -178,104 +238,140 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         Ok(true)
     }
 
-    fn read_tag_id(&mut self) -> Result<Option<u64>, TagIteratorError> {
+    #[inline(always)]
+    fn peek_tag_id(&mut self) -> Result<(u64, usize), TagIteratorError> {
         self.ensure_data_read(8)?;
-        match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
-            Some((value, length)) => {
-                if length > self.buffered_byte_length {
-                    Ok(None)
-                } else {
-                    self.internal_buffer_position += length;
-                    Ok(Some(value + (1 << (7 * length))))
-                }
-            },
-            None => Ok(None)
+        if self.buffer[self.internal_buffer_position] == 0 {
+            return Ok((0, 1));
         }
+        let length = 8 - self.buffer[self.internal_buffer_position].ilog2() as usize;
+        let mut val = self.buffer[self.internal_buffer_position] as u64;
+        for i in 1..length {
+            val <<= 8;
+            val += self.buffer[self.internal_buffer_position+i] as u64;
+        }
+        Ok((val, length))
     }
 
-    fn read_tag_size(&mut self) -> Result<Option<EBMLSize>, TagIteratorError> {
-        self.ensure_data_read(8)?;
-        match tools::read_vint(&self.buffer[self.internal_buffer_position..]).map_err(|e| TagIteratorError::CorruptedFileData(e.to_string()))? {
-            Some((value, length)) => {
-                if length > self.buffered_byte_length {
-                    Ok(None)
-                } else {
-                    self.internal_buffer_position += length;
-                    Ok(Some(EBMLSize::new(value, length)))
-                }
-            },
-            None => Ok(None)
+    #[inline]
+    fn peek_valid_tag_header(&mut self) -> Result<(u64, Option<TagDataType>, EBMLSize, usize), TagIteratorError> {
+        self.ensure_data_read(16)?;
+        let (tag_id, id_len) = self.peek_tag_id()?;
+        let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
+
+        let (size, size_len) = tools::read_vint(&self.buffer[(self.internal_buffer_position + id_len)..])
+                .or(Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData{tag_id, position: self.current_offset() })))?
+                .ok_or(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: Some(tag_id), tag_size: None, partial_data: None })?;
+
+        if matches!(spec_tag_type, Some(TagDataType::UnsignedInt) | Some(TagDataType::Integer) | Some(TagDataType::Float)) && size > 8 {
+            return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData{tag_id, position: self.current_offset() }));
         }
+
+        let size = EBMLSize::new(size, size_len);
+
+        let header_len = id_len + size_len;
+
+        if (self.allowed_errors & INVALID_TAG_ID_ERROR == 0) && spec_tag_type.is_none() {
+            return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagId{tag_id, position: self.current_offset() }));
+        }
+        
+        if (self.allowed_errors & INVALID_HIERARCHY_ERROR == 0) && spec_tag_type.is_some() {
+            // Do not run check for raw tags    ^^^^^^^^^^^^^^^^^^^^^^^
+            if !self.has_determined_doc_path {
+                //Trust that the first tag in the stream is valid (like if the read stream was seeked to this location)
+                let path = <TSpec>::get_path_by_id(tag_id);
+                if path.iter().all(|p| matches!(p, PathPart::Id(_))) {
+                    //We only know the current path if we read a tag that is non-global
+                    self.tag_stack = path.iter().map(|id| {
+                        match id {
+                            PathPart::Id(id) => {
+                                ProcessingTag { 
+                                    tag: <TSpec>::get_master_tag(*id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was in path, but could not get master tag!", id)),
+                                    size: EBMLSize::Unknown,
+                                    tag_start: 0,
+                                    data_start: 0,
+                                }
+                            },
+                            PathPart::Global(_) => unreachable!()
+                        }
+                    }).collect();
+                    self.has_determined_doc_path = true;
+                }
+            }
+            if self.has_determined_doc_path && !self.validate_tag_path(tag_id) {
+                return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::HierarchyError { found_tag_id: tag_id, current_parent_id: self.tag_stack.last().map(|tag| tag.tag.get_id()) }));
+            }
+        }
+
+        if (self.allowed_errors & OVERSIZED_CHILD_ERROR == 0) && size.is_known() && self.is_invalid_tag_size(header_len + size.value()) {
+            return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::OversizedChildElement{ position: self.current_offset(), tag_id, size: size.value()}));
+        }
+
+        Ok((tag_id, spec_tag_type, size, header_len))
     }
 
-    fn read_tag_data(&mut self, size: usize) -> Result<&[u8], TagIteratorError> {
+    #[inline(always)]
+    fn read_valid_tag_header(&mut self) -> Result<(u64, Option<TagDataType>, EBMLSize), TagIteratorError> {
+        let (tag_id, spec_tag_type, size, header_len) = self.peek_valid_tag_header()?;
+            
+        self.internal_buffer_position += header_len;
+        Ok((tag_id, spec_tag_type, size))
+    }
+
+    fn read_tag_data(&mut self, size: usize) -> Result<Option<&[u8]>, TagIteratorError> {
         self.ensure_capacity(size);
         if !self.ensure_data_read(size)? {
-            return Err(TagIteratorError::UnexpectedEOF { tag_start: 0, tag_id: None, tag_size: None, partial_data: Some(self.buffer[self.internal_buffer_position..].to_vec()) });
+            return Ok(None);
         }
 
         self.internal_buffer_position += size;
-        Ok(&self.buffer[(self.internal_buffer_position-size)..self.internal_buffer_position])
+        Ok(Some(&self.buffer[(self.internal_buffer_position-size)..self.internal_buffer_position]))
     }
 
     fn read_tag(&mut self) -> Result<ProcessingTag<TSpec>, TagIteratorError> {
         let tag_start = self.current_offset();
 
-        let tag_id = self.read_tag_id().and_then(|res| {
-            if let Some(res) = res {
-                Ok(res)
-            } else {
-                Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: None, tag_size: None, partial_data: None })
-            }
-        })?;
-        let size: EBMLSize = self.read_tag_size().and_then(|res| {
-            if let Some(res) = res {
-                Ok(res)
-            } else {
-                Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: None, partial_data: None })
-            }
-        })?;
+        let (tag_id, spec_tag_type, size) = self.read_valid_tag_header()?;
 
-        let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
         let data_start = self.current_offset();
-
-        let raw_data = if matches!(spec_tag_type, TagDataType::Master) {
+        let raw_data = if matches!(spec_tag_type, Some(TagDataType::Master)) {
             &[]
         } else if let Known(size) = size {
-            self.read_tag_data(size).map_err(|err| {
-                if let TagIteratorError::UnexpectedEOF{ tag_start: _, tag_id: _, tag_size: _, partial_data} = err {
-                    TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: Some(size), partial_data }
-                } else {
-                    err
-                }
-            })?
+            if let Some(data) = self.read_tag_data(size)? {
+                data
+            } else {
+                return Err(TagIteratorError::UnexpectedEOF { tag_start, tag_id: Some(tag_id), tag_size: Some(size), partial_data: Some(self.buffer[self.internal_buffer_position..].to_vec()) });
+            }
         } else {
-            return Err(TagIteratorError::CorruptedFileData("Unknown size for primitive tag not allowed".into()));
+            return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData{ tag_id, position: tag_start }));
         };
 
         let tag = match spec_tag_type {
-            TagDataType::Master => {
+            Some(TagDataType::Master) => {
                 TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was master, but could not get tag!", tag_id))
             },
-            TagDataType::UnsignedInt => {
+            Some(TagDataType::UnsignedInt) => {
                 let val = tools::arr_to_u64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                 TSpec::get_unsigned_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was unsigned int, but could not get tag!", tag_id))
             },
-            TagDataType::Integer => {
+            Some(TagDataType::Integer) => {
                 let val = tools::arr_to_i64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                 TSpec::get_signed_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was integer, but could not get tag!", tag_id))
             },
-            TagDataType::Utf8 => {
+            Some(TagDataType::Utf8) => {
                 let val = String::from_utf8(raw_data.to_vec()).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: ToolError::FromUtf8Error(raw_data.to_vec(), e) })?;
                 TSpec::get_utf8_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was utf8, but could not get tag!", tag_id))
             },
-            TagDataType::Binary => {
-                TSpec::get_binary_tag(tag_id, raw_data).unwrap_or_else(|| TSpec::get_raw_tag(tag_id, raw_data))
+            Some(TagDataType::Binary) => {
+                TSpec::get_binary_tag(tag_id, raw_data).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was binary, but could not get tag!", tag_id))
             },
-            TagDataType::Float => {
+            Some(TagDataType::Float) => {
                 let val = tools::arr_to_f64(raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
                 TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was float, but could not get tag!", tag_id))
             },
+            None => {
+                TSpec::get_raw_tag(tag_id, raw_data)
+            }
         };
 
         Ok(ProcessingTag { tag, size, tag_start, data_start })
@@ -313,18 +409,8 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         if let Some(next_read) = self.read_tag_checked() {
             if let Ok(next_tag) = &next_read {
                 while matches!(self.tag_stack.last(), Some(open_tag) if open_tag.size == Unknown) {
-                    // Unknown sized tags can be ended if we reach an element that is:
-                    //  - A parent of the tag
-                    //  - A direct sibling of the tag
-                    //  - A Root element
                     let open_tag = self.tag_stack.last().unwrap();
-                    let previous_tag_ended =
-                        open_tag.is_parent(next_tag.tag.get_id()) || // parent
-                        open_tag.is_sibling(&next_tag.tag) || // sibling
-                        ( // Root element
-                            std::mem::discriminant(&next_tag.tag) != std::mem::discriminant(&TSpec::get_raw_tag(next_tag.tag.get_id(), &[])) && 
-                            matches!(next_tag.tag.get_parent_id(), None)
-                        );
+                    let previous_tag_ended = open_tag.is_ended_by(next_tag.tag.get_id());
         
                     if previous_tag_ended {
                         let t = self.tag_stack.pop().unwrap();
@@ -341,7 +427,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
                         tag: TSpec::get_master_tag(tag_id, Master::End).unwrap(),
                         size: next_tag.size,
                         tag_start: next_tag.tag_start,
-                        data_start: next_tag.data_start
+                        data_start: next_tag.data_start,
                     });
 
                     if self.tag_ids_to_buffer.contains(&tag_id) {
@@ -416,6 +502,18 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         }
 
         TSpec::get_master_tag(tag_id, Master::Full(rolled_children)).unwrap_or_else(|| panic!("Bad specification implementation: Tag id 0x{:x?} type was master, but could not get tag!", tag_id))
+    }
+
+    #[inline(always)]
+    fn validate_tag_path(&self, tag_id: u64) -> bool {
+        validate_tag_path::<TSpec>(tag_id, self.tag_stack.iter().map(|p| (p.tag.get_id(), p.size)))
+    }
+
+    #[inline(always)]
+    fn is_invalid_tag_size(&self, size: usize) -> bool {
+        self.tag_stack.iter().filter(|p| p.size.is_known()).any(|t| {
+            (t.data_start + t.size.value()) < (self.current_offset() + size)
+        })
     }
 }
 

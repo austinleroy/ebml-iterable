@@ -1,6 +1,6 @@
 [package]
 name = "ebml-iterable-specification-derive"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Austin Blake <austinl3roy@gmail.com>"]
 edition = "2018"
 description = "Provides macros for implementing `EbmlSpecification` for the `ebml-iterable` crate."
@@ -15,4 +15,4 @@ proc-macro = true
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "1.0", features = ["full"] }
-ebml-iterable-specification = { version = "=0.3.0", path = "../specification" }
+ebml-iterable-specification = { version = "=0.4.0", path = "../specification" }

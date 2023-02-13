@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 use proc_macro2::TokenStream;
-use syn::{ItemEnum, Error, Generics, Ident, Result, LitInt, Path};
+use syn::{ItemEnum, Error, Generics, Ident, Result, LitInt, Path, spanned::Spanned};
 
 use ebml_iterable_specification::TagDataType;
 use quote::ToTokens;
+
+use crate::pathing::{EBMLPath, PathPart};
 
 pub struct Enum<'a> {
     pub original: &'a ItemEnum,
@@ -17,7 +19,7 @@ pub struct Variant<'a> {
     pub ident: Ident,
     pub id_attr: (u64, Attribute<'a>),
     pub data_type_attr: (TagDataType, Path, Attribute<'a>),
-    pub parent_attr: Option<(Ident, Attribute<'a>)>,
+    pub path_attr: Option<(EBMLPath, Attribute<'a>)>,
 }
 
 pub struct Attribute<'a> {
@@ -47,7 +49,7 @@ impl<'a> Variant<'a> {
     fn from_syn(node: &'a syn::Variant, variant_names: &HashSet<Ident>) -> Result<Self> {
         let mut id_attr: Option<(u64, Attribute<'a>)> = None;
         let mut data_type_attr: Option<(TagDataType, Path, Attribute<'a>)> = None;
-        let mut parent_attr: Option<(Ident, Attribute<'a>)> = None;
+        let mut path_attr: Option<(EBMLPath, Attribute<'a>)> = None;
 
         for attr in &node.attrs {
             if attr.path.is_ident("id") {
@@ -89,17 +91,30 @@ impl<'a> Variant<'a> {
                     original: attr,
                     tokens: &attr.tokens,
                 }));
-            } else if attr.path.is_ident("parent") {
-                if parent_attr.is_some() {
+            } else if attr.path.is_ident("doc_path") {
+                if path_attr.is_some() {
                     return Err(Error::new_spanned(node, format!("duplicate {} attribute", attr.to_token_stream())));
                 }
-                let ident = attr.parse_args::<syn::Ident>().map_err(|err| Error::new(err.span(), format!("{} must be Spec variant name", attr.to_token_stream())))?;
-                if node.ident == ident {
-                    return Err(Error::new_spanned(node, format!("{} cannot be self",  attr.to_token_stream())))
+                let path = attr.parse_args::<EBMLPath>().map_err(|err| Error::new(err.span(), format!("{} must be a path string", attr.to_token_stream())))?;
+                let mut last_was_global = false;
+                for path_part in &path.parts {
+                    match path_part {
+                        PathPart::Ident(id) => {
+                            last_was_global = false;
+                            variant_names.get(id).ok_or(Error::new(id.span(), format!("Unknown variant [{id}] in path")))?;
+                        },
+                        PathPart::Global((_, max)) => {
+                            if matches!(max, Some(0)) {
+                                return Err(Error::new(attr.span(), "Global maximum cannot be 0".to_string()));
+                            }
+                            if last_was_global {
+                                return Err(Error::new(attr.span(), "Cannot use GlobalPlaceholders back-to-back in path".to_string()));
+                            }
+                            last_was_global = true;
+                        }
+                    }
                 }
-                // take from set to keep proper span in case of errors
-                let def = variant_names.get(&ident).ok_or_else(|| Error::new(ident.span(), format!("{} must be Spec variant", attr.to_token_stream())))?.clone();
-                parent_attr = Some((def, Attribute {
+                path_attr = Some((path, Attribute {
                     original: attr,
                     tokens: &attr.tokens,
                 }))
@@ -119,7 +134,7 @@ impl<'a> Variant<'a> {
             ident: node.ident.clone(),
             id_attr,
             data_type_attr,
-            parent_attr
+            path_attr
         })
     }
 }
