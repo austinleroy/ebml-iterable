@@ -1,6 +1,6 @@
-use ebml_iterable_specification::{EbmlSpecification, EbmlTag, PathPart};
+use ebml_iterable_specification::{EbmlSpecification, EbmlTag};
 use std::convert::TryInto;
-use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
+use crate::{tag_iterator_util::EBMLSize::{Known, Unknown}, spec_util::is_ended_by};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EBMLSize {
@@ -62,27 +62,8 @@ impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag
         self.tag
     }
 
-    fn is_parent(&self, id: &u64) -> bool {
-        let path = <TSpec>::get_path_by_tag(&self.tag);
-        path.iter().any(|p| matches!(p, PathPart::Id(p) if p == id))
-    }
-
-    fn is_sibling(&self, compare: &u64) -> bool {
-        <TSpec>::get_path_by_tag(&self.tag) == <TSpec>::get_path_by_id(*compare)
-    }
-
-    pub fn is_ended_by(&self, id: &u64) -> bool {
-        // Unknown sized tags can be ended if we reach an element that is:
-        //  - A parent of the tag
-        //  - A direct sibling of the tag
-        //  - A Root element
-
-        self.is_parent(id) || // parent
-            self.is_sibling(id) || // sibling
-            ( // Root element
-                <TSpec>::get_tag_data_type(*id).is_some() && 
-                <TSpec>::get_path_by_id(*id).is_empty()
-            )
+    pub fn is_ended_by(&self, id: u64) -> bool {
+        is_ended_by::<TSpec>(self.tag.get_id(), id)
     }
 }
 

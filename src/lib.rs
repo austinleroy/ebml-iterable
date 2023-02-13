@@ -30,6 +30,7 @@ mod tag_writer;
 pub mod tools;
 pub mod specs;
 mod tag_iterator_util;
+mod spec_util;
 
 pub use self::tag_iterator::TagIterator;
 pub use self::tag_iterator_async::TagIteratorAsync;

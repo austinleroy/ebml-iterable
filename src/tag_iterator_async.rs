@@ -148,7 +148,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             match self.tag_stack.last() {
                 None => Ok(tag),
                 Some(previous_tag) => {
-                    let previous_tag_ended = previous_tag.is_ended_by(&tag_id);
+                    let previous_tag_ended = previous_tag.is_ended_by(tag_id);
                         
                     if previous_tag_ended {
                         Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), data_start: current_offset, tag_start: 0 }).into_inner())

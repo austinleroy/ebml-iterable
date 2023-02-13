@@ -1,6 +1,7 @@
 use std::io::Read;
 use std::collections::{HashSet, VecDeque};
 
+use crate::spec_util::validate_tag_path;
 use crate::tag_iterator_util::EBMLSize::{Known, Unknown};
 use crate::tag_iterator_util::{DEFAULT_BUFFER_LEN, EBMLSize, ProcessingTag, AllowableErrors};
 
@@ -409,7 +410,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             if let Ok(next_tag) = &next_read {
                 while matches!(self.tag_stack.last(), Some(open_tag) if open_tag.size == Unknown) {
                     let open_tag = self.tag_stack.last().unwrap();
-                    let previous_tag_ended = open_tag.is_ended_by(&next_tag.tag.get_id());
+                    let previous_tag_ended = open_tag.is_ended_by(next_tag.tag.get_id());
         
                     if previous_tag_ended {
                         let t = self.tag_stack.pop().unwrap();
@@ -505,48 +506,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
     #[inline(always)]
     fn validate_tag_path(&self, tag_id: u64) -> bool {
-        for unk_size_tag in self.tag_stack.iter().filter(|t| matches!(t.size, EBMLSize::Unknown)) {
-            if unk_size_tag.is_ended_by(&tag_id) {
-                return true;
-            }
-        }
-
-        let path = <TSpec>::get_path_by_id(tag_id);
-        let mut path_marker = 0;
-        let mut global_counter = 0;
-        for processing_tag_id in self.tag_stack.iter().map(|t| t.tag.get_id()) {
-            if path_marker >= path.len() {
-                return false;
-            }
-
-            match path[path_marker] {
-                PathPart::Id(id) => {
-                    if id != processing_tag_id {
-                        return false;
-                    }
-                    path_marker += 1;
-                },
-                PathPart::Global((min, max)) => {
-                    global_counter += 1;
-                    if max.is_some() && global_counter > max.unwrap_or_default() {
-                        return false;
-                    }
-                    if path.len() > (path_marker + 1) && matches!(path[path_marker + 1], PathPart::Id(id) if id == processing_tag_id) {
-                        if min.is_some() && global_counter < min.unwrap_or_default() {
-                            return false;
-                        }
-                        path_marker += 2;
-                        global_counter = 0;
-                    }
-                },
-            }
-        }
-
-        // Validate that we compared ALL parents in the path
-        path.len() == path_marker || 
-        // or that the last parent was a global whose minimum was met
-            ((path.len() - 1) == path_marker && matches!(path[path_marker], PathPart::Global((min, _)) if global_counter >= min.unwrap_or(0)))
-        
+        validate_tag_path::<TSpec>(tag_id, self.tag_stack.iter().map(|p| (p.tag.get_id(), p.size)))
     }
 
     #[inline(always)]

@@ -258,6 +258,16 @@ pub mod tag_writer {
     pub enum TagWriterError {
 
         ///
+        /// An error indicating the tag to be written doesn't conform to the current specification.
+        /// 
+        /// This error occurs if you attempt to write a tag outside of a valid document path.  See the [EBML RFC](https://www.rfc-editor.org/rfc/rfc8794.html#section-11.1.6.2) for details on element paths.
+        /// 
+        UnexpectedTag {
+            tag_id: u64,
+            current_path: Vec<u64>,
+        },
+
+        ///
         /// An error with a tag id.
         /// 
         /// This error should only occur if writing "RawTag" variants, and only if the input id is not a valid vint.
@@ -302,7 +312,8 @@ pub mod tag_writer {
     impl fmt::Display for TagWriterError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                TagWriterError::TagIdError(id) => write!(f, "Tag id {id} is not a valid vint"),
+                TagWriterError::UnexpectedTag { tag_id, current_path } => write!(f, "Unexpected tag 0x{tag_id:x?} when writing to {current_path:x?}"),
+                TagWriterError::TagIdError(id) => write!(f, "Tag id 0x{id:x?} is not a valid vint"),
                 TagWriterError::TagSizeError(message) => write!(f, "Problem writing data tag size. {message}"),
                 TagWriterError::UnexpectedClosingTag { tag_id, expected_id } => match expected_id {
                     Some(expected) => write!(f, "Unexpected closing tag 0x'{tag_id:x?}'. Expected 0x'{expected:x?}'"),
@@ -316,6 +327,7 @@ pub mod tag_writer {
     impl Error for TagWriterError {
         fn source(&self) -> Option<&(dyn Error + 'static)> {
             match self {
+                TagWriterError::UnexpectedTag { tag_id: _, current_path: _ } => None,
                 TagWriterError::TagIdError(_) => None,
                 TagWriterError::TagSizeError(_) => None,
                 TagWriterError::UnexpectedClosingTag { tag_id: _, expected_id: _ } => None,

@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::convert::{TryInto, TryFrom};
 
+use crate::spec_util::validate_tag_path;
+
 use super::tag_iterator_util::EBMLSize::{self, Known, Unknown};
 
 use super::tools::{Vint, is_vint};
@@ -199,9 +201,15 @@ impl<W: Write> TagWriter<W>
     /// ```
     ///
     pub fn write<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<(), TagWriterError> {
-        // TODO - verify tag hierarchy when writing
         let tag_id = tag.get_id();
-        match TSpec::get_tag_data_type(tag_id) {
+        let tag_type = TSpec::get_tag_data_type(tag_id);
+
+        let should_validate = tag_type.is_some() && (!matches!(tag_type, Some(TagDataType::Master)) || !matches!(tag.as_master().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)), Master::End));
+        if should_validate && !validate_tag_path::<TSpec>(tag.get_id(), self.open_tags.iter().copied()) {
+            return Err(TagWriterError::UnexpectedTag { tag_id: tag.get_id(), current_path: self.open_tags.iter().map(|t| t.0).collect() });
+        }
+
+        match tag_type {
             Some(TagDataType::UnsignedInt) => {
                 let val = tag.as_unsigned_int().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was unsigned int, but could not get tag!", tag_id));
                 self.write_unsigned_int_tag(tag_id, val)?

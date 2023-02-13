@@ -47,18 +47,15 @@ pub mod corrupt_data_tests {
     }
 
     fn get_data_with_hierarchy_problems() -> Cursor<Vec<u8>> {
-        let tags: Vec<TestSpec> = vec![
-            TestSpec::Segment(Master::Start),
-            TestSpec::Count(1),
-            TestSpec::Segment(Master::End),
-        ];
+        // Test based on this structure.  Can't use the writer for this test since it checks hierarchy when writing.
+        
+        // let tags: Vec<TestSpec> = vec![
+        //     TestSpec::Segment(Master::Start),
+        //     TestSpec::Count(1),
+        //     TestSpec::Segment(Master::End),
+        // ];
 
-        let mut dest = Cursor::new(Vec::new());
-        let mut writer = TagWriter::new(&mut dest);
-
-        for tag in tags.iter() {
-            writer.write(tag).expect("Test shouldn't error");
-        }
+        let mut dest = Cursor::new(vec![0x18, 0x53, 0x80, 0x67, 0x84, 0x41, 0x00, 0x81, 0x01]);
 
         println!("dest {:x?}", dest);
         dest.set_position(0);
