@@ -225,4 +225,40 @@ pub mod spec_write_read {
         let reader: TagIterator<_, TestSpec> = TagIterator::new(&mut src, &[]);
         reader.for_each(|t| assert!(t.is_ok()));
     }
+
+    #[test]
+    pub fn validate_global_hierarchies() {
+        let tags: Vec<TestSpec> = vec![
+            TestSpec::Ebml(Master::Start),
+            TestSpec::Ebml(Master::End),
+            TestSpec::Void(vec![0xa0]),
+            TestSpec::Segment(Master::Start),
+            TestSpec::Crc32(vec![0x01]),
+            TestSpec::TrackType(0x01),
+            TestSpec::Cluster(Master::Start),
+            TestSpec::Crc32(vec![0x02]),
+            TestSpec::Count(1),
+            TestSpec::Cluster(Master::End),
+            TestSpec::Segment(Master::End),
+        ];
+
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        for tag in tags.iter() {
+            writer.write(tag).expect("Test shouldn't error");
+        }
+
+        println!("dest {:?}", dest);
+
+        let mut src = Cursor::new(dest.get_ref().to_vec());
+        let reader = TagIterator::new(&mut src, &[]);
+        let read_tags: Vec<TestSpec> = reader.into_iter().map(|t| t.unwrap()).collect();
+
+        println!("tags {:?}", read_tags);
+
+        for i in 0..read_tags.len() {
+            assert_eq!(tags[i], read_tags[i]);
+        }       
+    }
 }

@@ -57,12 +57,32 @@ pub mod tag_iterator {
         ///
         /// An error indicating the reader found an ebml tag id not defined in the current specification.
         /// 
-        InvalidTagId(u64),
+        InvalidTagId{
+            ///
+            /// The position of the element.
+            /// 
+            position: usize, 
+            
+            ///
+            /// The id of the tag that was found.
+            /// 
+            tag_id: u64, 
+        },
 
         ///
         /// An error indicating the reader could not parse a valid tag due to corrupted tag data (size/contents).
         /// 
-        InvalidTagData,
+        InvalidTagData{
+            ///
+            /// The position of the element.
+            /// 
+            position: usize, 
+            
+            ///
+            /// The id of the tag that was found.
+            /// 
+            tag_id: u64, 
+        },
 
         ///
         /// An error indicating the reader found an element outside of its expected hierarchy.
@@ -77,19 +97,51 @@ pub mod tag_iterator {
             ///
             /// The id of the current "master" element that contains the tag that was found.
             /// 
-            current_parent_id: u64,
+            current_parent_id: Option<u64>,
+        },
+
+        ///
+        /// An error indicating the reader found a child element with incorrect sizing.
+        /// 
+        OversizedChildElement { 
+            
+            ///
+            /// The position of the element.
+            /// 
+            position: usize, 
+            
+            ///
+            /// The id of the tag that was found.
+            /// 
+            tag_id: u64, 
+            
+            ///
+            /// The size of the tag that was found.
+            /// 
+            size: usize 
         },
     }
 
     impl fmt::Display for CorruptedFileError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
-                CorruptedFileError::InvalidTagId(tag_id) => write!(f, "Encountered invalid tag id: {tag_id:x?}"),
-                CorruptedFileError::InvalidTagData => write!(f, "Encountered invalid tag data"),
-                CorruptedFileError::HierarchyError { 
+                CorruptedFileError::InvalidTagId {
+                    position, 
+                    tag_id
+                } => write!(f, "Encountered invalid tag id [0x{tag_id:x?}] at position {position}"),
+                CorruptedFileError::InvalidTagData {
+                    position, 
+                    tag_id 
+                } => write!(f, "Encountered invalid tag data for tag id [0x{tag_id:x?}] at position {position}"),
+                CorruptedFileError::HierarchyError {
                     found_tag_id,
                     current_parent_id,
                 } => write!(f, "Found child tag [{found_tag_id:x?}] when processing parent [{current_parent_id:x?}]"),
+                CorruptedFileError::OversizedChildElement { 
+                    position, 
+                    tag_id, 
+                    size : _
+                } => write!(f, "Found an oversized tag [0x{tag_id:x?}] at position {position}")
             }
         }
     }

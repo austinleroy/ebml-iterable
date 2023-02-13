@@ -38,11 +38,6 @@ pub mod derive_spec_compile {
         #[data_type(TagDataType::Integer)]
         #[doc_path(Root/Parent)]
         Id,
-
-        #[id(0xec)]
-        #[data_type(TagDataType::Binary)]
-        #[doc_path((1-))]
-        Crc32,
     }
 
     #[test]

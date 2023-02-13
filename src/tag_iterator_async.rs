@@ -83,7 +83,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
 
     async fn read_tag_size(&mut self) -> Result<EBMLSize, TagIteratorError> {
         self.ensure_data_read(8).await?;
-        match tools::read_vint(&self.buf).or(Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData)))? {
+        match tools::read_vint(&self.buf).or(Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData { tag_id: 0, position: self.current_offset() })))? {
             Some((value, length)) => {
                 self.advance(length);
                 Ok(EBMLSize::new(value, length))
@@ -111,14 +111,14 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                 tag: TSpec::get_master_tag(tag_id, Master::End).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)),
                 size,
                 data_start: current_offset,
-                tag_start: 0 //not implemented here
+                tag_start: 0, //not implemented here
             });
             Ok(TSpec::get_master_tag(tag_id, Master::Start).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)))
         } else {
             let size = if let Known(size) = size {
                 size
             } else {
-                return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData));
+                return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData { tag_id, position: current_offset }));
             };
             
             let raw_data = self.read_tag_data(size).await?;

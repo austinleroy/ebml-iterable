@@ -27,6 +27,24 @@ impl EBMLSize {
             Err(_) => Unknown
         }
     }
+
+    #[inline(always)]
+    pub fn is_known(&self) -> bool {
+        matches!(&self, &EBMLSize::Known(_))
+    }
+
+    ///
+    /// # Panics
+    /// 
+    /// Panics if the current variant is not EBMLSize::Known
+    /// 
+    #[inline(always)]
+    pub fn value(&self) -> usize {
+        match &self {
+            EBMLSize::Known(val) => *val,
+            _ => panic!("Called EBMLSize::value() on an unknown size!"),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -71,16 +89,21 @@ impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag
 pub const DEFAULT_BUFFER_LEN: usize = 1024 * 64;
 
 ///
-/// Used to relax rules on how strictly a [`TagIterator`](ebml_iterable::TagIterator) should validate the read stream.
+/// Used to relax rules on how strictly a [`TagIterator`](crate::TagIterator) should validate the read stream.
 /// 
 pub enum AllowableErrors {
     ///
-    /// Causes the [`TagIterator`](ebml_iterable::TagIterator) to produce "RawTag" binary variants for any unknown tag ids rather than throwing an error.
+    /// Causes the [`TagIterator`](crate::TagIterator) to produce "RawTag" binary variants for any unknown tag ids rather than throwing an error.
     /// 
     InvalidTagIds,
 
     ///
-    /// Causes the [`TagIterator`](ebml_iterable::TagIterator) to emit tags even if they appear outside of their defined parent element.
+    /// Causes the [`TagIterator`](crate::TagIterator) to emit tags even if they appear outside of their defined parent element.
     /// 
     HierarchyProblems,
+
+    ///
+    /// Causes the [`TagIterator`](crate::TagIterator) to emit tags even if they exceed the length of a parent element.
+    /// 
+    OversizedTags,
 }

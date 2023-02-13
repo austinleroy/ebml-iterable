@@ -65,7 +65,7 @@ impl std::fmt::Display for PathPart {
                 } else {
                     String::new()
                 };
-                write!(f, "({}-{})", min, max)
+                write!(f, "({min}-{max})")
             }
         }
     }

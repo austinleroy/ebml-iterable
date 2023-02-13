@@ -23,7 +23,10 @@ use crate::easy_ebml::EasyEBML;
 /// 
 /// # Note
 ///
-/// This attribute modifies the variants in the enumeration by adding fields to them.  It also will add a `RawTag(u64, Vec<u8>)` variant to the enumeration.
+/// This attribute modifies the variants in the enumeration by adding fields to them.  It also will add the following variants to the enum:
+/// - `Crc32(Vec<u8>)` - global tag defined in the EBML spec
+/// - `Void(Vec<u8>)` - global tag defined in the EBML spec
+/// - `RawTag(u64, Vec<u8>)` - used to support reading "unknown" tags that aren't in the spec
 ///
 /// [spec]: ebml_iterable_specification::EbmlSpecification
 /// [tag]: ebml_iterable_specification::EbmlTag

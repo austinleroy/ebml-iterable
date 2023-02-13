@@ -38,6 +38,8 @@ pub enum TestSpec {
     Count(u64),
     Block(::std::vec::Vec<u8>),
     SimpleBlock(::std::vec::Vec<u8>),
+    Crc32(::std::vec::Vec<u8>),
+    Void(::std::vec::Vec<u8>),
     RawTag(u64, ::std::vec::Vec<u8>),
 }
 impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
@@ -56,6 +58,8 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
             16640u64 => Some(TagDataType::UnsignedInt),
             161u64 => Some(TagDataType::Binary),
             163u64 => Some(TagDataType::Binary),
+            191u64 => Some(ebml_iterable::specs::TagDataType::Binary),
+            236u64 => Some(ebml_iterable::specs::TagDataType::Binary),
             _ => None,
         }
     }
@@ -86,6 +90,8 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
                 ebml_iterable::specs::PathPart::Id(408125543u64),
                 ebml_iterable::specs::PathPart::Id(524531317u64),
             ],
+            191u64 => &[ebml_iterable::specs::PathPart::Global((Some(1u64), None))],
+            236u64 => &[ebml_iterable::specs::PathPart::Global((None, None))],
             _ => &[],
         }
     }
@@ -114,6 +120,8 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
         match id {
             161u64 => Some(TestSpec::Block(data.to_vec())),
             163u64 => Some(TestSpec::SimpleBlock(data.to_vec())),
+            191u64 => Some(TestSpec::Crc32(data.to_vec())),
+            236u64 => Some(TestSpec::Void(data.to_vec())),
             _ => None,
         }
     }
@@ -152,6 +160,8 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
             TestSpec::Count(_) => 16640u64,
             TestSpec::Block(_) => 161u64,
             TestSpec::SimpleBlock(_) => 163u64,
+            TestSpec::Crc32(_) => 191u64,
+            TestSpec::Void(_) => 236u64,
             TestSpec::RawTag(id, _data) => *id,
         }
     }
@@ -180,6 +190,8 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
         match self {
             TestSpec::Block(val) => Some(val),
             TestSpec::SimpleBlock(val) => Some(val),
+            TestSpec::Crc32(val) => Some(val),
+            TestSpec::Void(val) => Some(val),
             TestSpec::RawTag(_id, data) => Some(data),
             _ => None,
         }

@@ -81,7 +81,7 @@ impl EasyEBMLVariant {
             tokens: quote!((TagDataType::#ty))
         });
 
-        if path.len() > 0 {
+        if !path.is_empty() {
             let mut tokens: Punctuated<PathPart, Token![/]> = Punctuated::new();
             for part in path {
                 tokens.push(part);

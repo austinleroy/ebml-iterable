@@ -11,6 +11,20 @@ use super::ast::Enum;
 use super::pathing::PathPart;
 
 pub fn impl_ebml_specification(original: &mut ItemEnum) -> Result<TokenStream> {
+    let tag_data_type = spanned_tag_data_type(original);
+    original.variants.push(syn::parse2::<Variant>(quote!{
+        #[id(0xbf)]
+        #[data_type(#tag_data_type::Binary)]
+        #[doc_path((1-))]
+        Crc32
+    })?);
+    original.variants.push(syn::parse2::<Variant>(quote!{
+        #[id(0xec)]
+        #[data_type(#tag_data_type::Binary)]
+        #[doc_path((-))]
+        Void
+    })?);
+
     let input = Enum::from_syn(original)?;
 
     let mut used_ids = HashMap::<u64, &Variant>::new();
@@ -50,7 +64,7 @@ fn validate_path(origin: &crate::ast::Variant, variants_map: &HashMap<&Ident, &c
             } else {
                 None
             }
-        }).nth(0) {
+        }).next() {
             let parent = *variants_map.get(parent).unwrap();
             if parent.data_type_attr.0 != Master {
                 return Err(Error::new_spanned(parent.original, "Parents must be of Master type"))

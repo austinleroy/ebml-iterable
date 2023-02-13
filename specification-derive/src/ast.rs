@@ -101,14 +101,14 @@ impl<'a> Variant<'a> {
                     match path_part {
                         PathPart::Ident(id) => {
                             last_was_global = false;
-                            variant_names.get(&id).ok_or(Error::new(id.span(), format!("Unknown variant [{id}] in path")))?;
+                            variant_names.get(id).ok_or(Error::new(id.span(), format!("Unknown variant [{id}] in path")))?;
                         },
                         PathPart::Global((_, max)) => {
                             if matches!(max, Some(0)) {
-                                return Err(Error::new(attr.span(), format!("Global maximum cannot be 0")));
+                                return Err(Error::new(attr.span(), "Global maximum cannot be 0".to_string()));
                             }
                             if last_was_global {
-                                return Err(Error::new(attr.span(), format!("Cannot use GlobalPlaceholders back-to-back in path")));
+                                return Err(Error::new(attr.span(), "Cannot use GlobalPlaceholders back-to-back in path".to_string()));
                             }
                             last_was_global = true;
                         }

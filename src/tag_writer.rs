@@ -199,6 +199,7 @@ impl<W: Write> TagWriter<W>
     /// ```
     ///
     pub fn write<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<(), TagWriterError> {
+        // TODO - verify tag hierarchy when writing
         let tag_id = tag.get_id();
         match TSpec::get_tag_data_type(tag_id) {
             Some(TagDataType::UnsignedInt) => {
