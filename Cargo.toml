@@ -16,7 +16,7 @@ repository = "https://github.com/austinleroy/ebml-iterable"
 [dependencies]
 ebml-iterable-specification = { version = "=0.4.0", path = "specification" }
 ebml-iterable-specification-derive = { version = "=0.4.0", path = "specification-derive", optional = true }
-futures = "0.3.21"
+futures = { version = "0.3.21", optional = true }
 
 [features]
 derive-spec = ["ebml-iterable-specification-derive"]

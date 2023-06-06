@@ -25,6 +25,7 @@
 
 mod errors;
 mod tag_iterator;
+#[cfg(feature = "futures")]
 mod tag_iterator_async;
 mod tag_writer;
 pub mod tools;
@@ -33,6 +34,7 @@ mod tag_iterator_util;
 mod spec_util;
 
 pub use self::tag_iterator::TagIterator;
+#[cfg(feature = "futures")]
 pub use self::tag_iterator_async::TagIteratorAsync;
 pub use self::tag_writer::TagWriter;
 
@@ -41,7 +43,6 @@ pub mod iterator {
 }
 
 pub mod error {
-
     //!
     //! Potential errors that can occur when reading or writing EBML data.
     //!
