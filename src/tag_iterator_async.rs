@@ -2,6 +2,8 @@ use std::io::ErrorKind;
 use std::iter::repeat;
 use std::mem;
 use ebml_iterable_specification::{EbmlSpecification, EbmlTag, Master, TagDataType};
+
+#[cfg(feature = "futures")]
 use futures::{AsyncRead, AsyncReadExt, Stream};
 use crate::error::{TagIteratorError, ToolError};
 use crate::errors::tag_iterator::CorruptedFileError;
@@ -14,6 +16,7 @@ use crate::tools;
 ///
 /// The struct can be created with the [`new()`][TagIteratorAsync::new] function on any source that implements the [`futures::AsyncRead`] trait.
 ///
+#[cfg(feature = "futures")]
 pub struct TagIteratorAsync<R: AsyncRead + Unpin, TSpec>
     where
         TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
@@ -21,20 +24,20 @@ pub struct TagIteratorAsync<R: AsyncRead + Unpin, TSpec>
     read: R,
     buf: Vec<u8>,
     offset: usize,
-    tag_stack: Vec<ProcessingTag<TSpec>>
+    tag_stack: Vec<ProcessingTag<TSpec>>,
 }
 
+#[cfg(feature = "futures")]
 impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
     where
         TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
 {
-
     pub fn new(read: R) -> Self {
         Self {
             read,
             buf: Default::default(),
             offset: 0,
-            tag_stack: Default::default()
+            tag_stack: Default::default(),
         }
     }
 
@@ -64,7 +67,7 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
                         Ok(false)
                     }
                     _ => Err(TagIteratorError::ReadError { source })
-                }
+                };
             }
         }
         Ok(true)
@@ -76,8 +79,8 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             Some((value, length)) => {
                 self.advance(length);
                 Ok(value + (1 << (7 * length)))
-            },
-            None => Err(TagIteratorError::UnexpectedEOF{ tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None }),
+            }
+            None => Err(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None }),
         }
     }
 
@@ -87,14 +90,14 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             Some((value, length)) => {
                 self.advance(length);
                 Ok(EBMLSize::new(value, length))
-            },
-            None => Err(TagIteratorError::UnexpectedEOF{ tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None }),
+            }
+            None => Err(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None }),
         }
     }
 
     async fn read_tag_data(&mut self, size: usize) -> Result<Vec<u8>, TagIteratorError> {
         if !self.ensure_data_read(size).await? {
-            return Err(TagIteratorError::UnexpectedEOF{ tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None });
+            return Err(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: None, tag_size: None, partial_data: None });
         }
         Ok(self.advance_get(size))
     }
@@ -120,43 +123,43 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             } else {
                 return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData { tag_id, position: current_offset }));
             };
-            
+
             let raw_data = self.read_tag_data(size).await?;
             let tag = match spec_tag_type {
-                Some(TagDataType::Master) => { unreachable!("Master should have been handled before querying data") },
+                Some(TagDataType::Master) => { unreachable!("Master should have been handled before querying data") }
                 Some(TagDataType::UnsignedInt) => {
-                    let val = tools::arr_to_u64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
+                    let val = tools::arr_to_u64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: e })?;
                     TSpec::get_unsigned_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was unsigned int, but could not get tag!", tag_id))
-                },
+                }
                 Some(TagDataType::Integer) => {
-                    let val = tools::arr_to_i64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
+                    let val = tools::arr_to_i64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: e })?;
                     TSpec::get_signed_int_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was integer, but could not get tag!", tag_id))
-                },
+                }
                 Some(TagDataType::Utf8) => {
-                    let val = String::from_utf8(raw_data.to_vec()).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: ToolError::FromUtf8Error(raw_data, e) })?;
+                    let val = String::from_utf8(raw_data.to_vec()).map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: ToolError::FromUtf8Error(raw_data, e) })?;
                     TSpec::get_utf8_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was utf8, but could not get tag!", tag_id))
-                },
+                }
                 Some(TagDataType::Binary) | None => {
                     TSpec::get_binary_tag(tag_id, &raw_data).unwrap_or_else(|| TSpec::get_raw_tag(tag_id, &raw_data))
-                },
+                }
                 Some(TagDataType::Float) => {
-                    let val = tools::arr_to_f64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData{ tag_id, problem: e })?;
+                    let val = tools::arr_to_f64(&raw_data).map_err(|e| TagIteratorError::CorruptedTagData { tag_id, problem: e })?;
                     TSpec::get_float_tag(tag_id, val).unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was float, but could not get tag!", tag_id))
-                },
+                }
             };
 
             match self.tag_stack.last() {
                 None => Ok(tag),
                 Some(previous_tag) => {
                     let previous_tag_ended = previous_tag.is_ended_by(tag_id);
-                        
+
                     if previous_tag_ended {
                         Ok(mem::replace(self.tag_stack.last_mut().unwrap(), ProcessingTag { tag, size: Known(size), data_start: current_offset, tag_start: 0 }).into_inner())
                     } else {
                         Ok(tag)
                     }
                 }
-            }    
+            }
         }
     }
 
