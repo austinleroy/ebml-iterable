@@ -73,8 +73,8 @@ fn check_size_u64(val: u64, max_length: usize) -> Result<(), ToolError> {
 #[inline]
 fn as_vint_no_check_u64<const LENGTH: usize>(val: u64) -> [u8; LENGTH] {
     let mut bytes: [u8; 8] = val.to_be_bytes();
-    bytes[(8-LENGTH)] |= 1 << (8 - LENGTH);
-    bytes[(8-LENGTH)..].try_into().expect("8 - (8-length) != length !?!?")
+    bytes[8-LENGTH] |= 1 << (8 - LENGTH);
+    bytes[8-LENGTH..].try_into().expect("8 - (8-length) != length !?!?")
 }
 
 /// 

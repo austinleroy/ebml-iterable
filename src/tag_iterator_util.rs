@@ -58,10 +58,6 @@ pub struct ProcessingTag<TSpec>
 }
 
 impl<TSpec> ProcessingTag<TSpec> where TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone {
-    pub fn into_inner(self) -> TSpec {
-        self.tag
-    }
-
     pub fn is_ended_by(&self, id: u64) -> bool {
         is_ended_by::<TSpec>(self.tag.get_id(), id)
     }
