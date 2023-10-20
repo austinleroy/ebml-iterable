@@ -39,7 +39,7 @@ pub fn is_ended_by<T: EbmlSpecification<T> + EbmlTag<T> + Clone>(current_id: u64
 }
 
 #[inline(always)]
-pub fn validate_tag_path<T: EbmlSpecification<T> + EbmlTag<T> + Clone>(tag_id: u64, doc_path: impl Iterator<Item = (u64, EBMLSize)>) -> bool {
+pub fn validate_tag_path<T: EbmlSpecification<T> + EbmlTag<T> + Clone>(tag_id: u64, doc_path: impl Iterator<Item = (u64, EBMLSize, usize)>) -> bool {
     let path = <T>::get_path_by_id(tag_id);
     let mut path_marker = 0;
     let mut global_counter = 0;

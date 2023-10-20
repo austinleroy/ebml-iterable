@@ -506,7 +506,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
     #[inline(always)]
     fn validate_tag_path(&self, tag_id: u64) -> bool {
-        validate_tag_path::<TSpec>(tag_id, self.tag_stack.iter().map(|p| (p.tag.get_id(), p.size)))
+        validate_tag_path::<TSpec>(tag_id, self.tag_stack.iter().map(|p| (p.tag.get_id(), p.size, 0)))
     }
 
     #[inline(always)]

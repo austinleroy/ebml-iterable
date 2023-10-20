@@ -3,7 +3,7 @@ mod test_spec;
 pub mod spec_write_read {
     use ebml_iterable::error::TagIteratorError;
     use ebml_iterable::specs::{Master, EbmlTag};
-    use ebml_iterable::{TagIterator, TagWriter};
+    use ebml_iterable::{TagIterator, TagWriter, WriteOptions};
     use std::io::Cursor;
 
     use super::test_spec::TestSpec;
@@ -95,7 +95,7 @@ pub mod spec_write_read {
         let mut writer = TagWriter::new(&mut dest);
 
         writer.write(&TestSpec::Root(Master::Start)).unwrap();
-        writer.write_unknown_size(&TestSpec::Parent(Master::Start)).unwrap();
+        writer.write_advanced(&TestSpec::Parent(Master::Start), WriteOptions::is_unknown_sized_element()).unwrap();
         writer.write(&TestSpec::Child(1)).unwrap();
         writer.write(&TestSpec::Child(2)).unwrap();
         writer.write(&TestSpec::Parent(Master::End)).unwrap();
@@ -114,7 +114,7 @@ pub mod spec_write_read {
         let mut writer = TagWriter::new(&mut dest);
 
         writer.write(&TestSpec::Root(Master::Start)).unwrap();
-        writer.write_unknown_size(&TestSpec::Parent(Master::Start)).unwrap();
+        writer.write_advanced(&TestSpec::Parent(Master::Start), WriteOptions::is_unknown_sized_element()).unwrap();
         writer.write(&TestSpec::Child(1)).unwrap();
         writer.write(&TestSpec::Child(2)).unwrap();
         writer.write(&TestSpec::Parent(Master::End)).unwrap();
@@ -137,7 +137,34 @@ pub mod spec_write_read {
         let mut writer = TagWriter::new(&mut dest);
 
         writer.write(&TestSpec::Root(Master::Start)).unwrap();
-        writer.write_unknown_size(&TestSpec::Parent(Master::Start)).unwrap();
+        writer.write_advanced(&TestSpec::Parent(Master::Start), WriteOptions::is_unknown_sized_element()).unwrap();
+        writer.write(&TestSpec::Child(1)).unwrap();
+        writer.write(&TestSpec::Child(2)).unwrap();
+        writer.write(&TestSpec::Parent(Master::End)).unwrap();
+        writer.write(&TestSpec::Int(2)).unwrap();
+        writer.write(&TestSpec::Root(Master::End)).unwrap();
+
+        println!("{dest:x?}");
+        dest.set_position(0);
+        
+        let mut iter = TagIterator::<_, TestSpec>::new(dest, &[]);
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Root(Master::Start)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Parent(Master::Start)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Child(1)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Child(2)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Parent(Master::End)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Int(2)))));
+        assert!(matches!(iter.next(), Some(Ok(TestSpec::Root(Master::End)))));
+        assert!(matches!(iter.next(), None));
+    }
+
+    #[test]
+    pub fn specific_size_length_write_read() {
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        writer.write(&TestSpec::Root(Master::Start)).unwrap();
+        writer.write_advanced(&TestSpec::Parent(Master::Start), WriteOptions::set_size_byte_count(8)).unwrap();
         writer.write(&TestSpec::Child(1)).unwrap();
         writer.write(&TestSpec::Child(2)).unwrap();
         writer.write(&TestSpec::Parent(Master::End)).unwrap();

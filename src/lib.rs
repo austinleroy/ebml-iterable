@@ -25,16 +25,17 @@
 
 mod errors;
 mod tag_iterator;
-mod tag_iterator_async;
 mod tag_writer;
 pub mod tools;
 pub mod specs;
 mod tag_iterator_util;
 mod spec_util;
 
+#[cfg(feature = "futures")]
+pub mod nonblocking;
+
 pub use self::tag_iterator::TagIterator;
-pub use self::tag_iterator_async::TagIteratorAsync;
-pub use self::tag_writer::TagWriter;
+pub use self::tag_writer::{TagWriter, WriteOptions};
 
 pub mod iterator {
     pub use super::tag_iterator_util::AllowableErrors;

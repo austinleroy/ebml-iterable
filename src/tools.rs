@@ -19,18 +19,27 @@ pub trait Vint: Into<u64> + Copy {
     ///
     /// This can return an error if the value is too large to be representable as a vint.
     /// 
-    fn as_vint(&self) -> Result<Vec<u8>, ToolError> {
-        let val: u64 = (*self).into();
+    fn as_vint(self) -> Result<Vec<u8>, ToolError> {
+        let val: u64 = self.into();
         check_size_u64(val, 8)?;
-        let mut length = 1;
-        while length <= 8 {
-            if val < (1 << (7 * length)) {
-                break;
-            }
-            length += 1;
-        }
 
-        Ok(as_vint_no_check_u64(val, length))
+        if val < (1 << 7) {
+            Ok(as_vint_no_check_u64::<1>(val).to_vec())
+        } else if val < (1 << (7 * 2)) {
+            Ok(as_vint_no_check_u64::<2>(val).to_vec())
+        } else if val < (1 << (7 * 3)) {
+            Ok(as_vint_no_check_u64::<3>(val).to_vec())
+        } else if val < (1 << (7 * 4)) {
+            Ok(as_vint_no_check_u64::<4>(val).to_vec())
+        } else if val < (1 << (7 * 5)) {
+            Ok(as_vint_no_check_u64::<5>(val).to_vec())
+        } else if val < (1 << (7 * 6)) {
+            Ok(as_vint_no_check_u64::<6>(val).to_vec())
+        } else if val < (1 << (7 * 7)) {
+            Ok(as_vint_no_check_u64::<7>(val).to_vec())
+        } else {
+            Ok(as_vint_no_check_u64::<8>(val).to_vec())
+        }
     }
 
     ///
@@ -40,10 +49,10 @@ pub trait Vint: Into<u64> + Copy {
     ///
     /// This can return an error if the value is too large to be representable as a vint.
     /// 
-    fn as_vint_with_length(&self, length: usize) -> Result<Vec<u8>, ToolError> {
+    fn as_vint_with_length<const LENGTH: usize>(&self) -> Result<[u8; LENGTH], ToolError> {
         let val: u64 = (*self).into();
-        check_size_u64(val, length)?;
-        Ok(as_vint_no_check_u64(val, length))
+        check_size_u64(val, LENGTH)?;
+        Ok(as_vint_no_check_u64::<LENGTH>(val))
     }
 }
 
@@ -62,11 +71,10 @@ fn check_size_u64(val: u64, max_length: usize) -> Result<(), ToolError> {
 }
 
 #[inline]
-fn as_vint_no_check_u64(val: u64, length: usize) -> Vec<u8> {
-    let bytes: [u8; 8] = val.to_be_bytes();
-    let mut result: Vec<u8> = Vec::from(&bytes[(8-length)..]);
-    result[0] |= 1 << (8 - length);
-    result
+fn as_vint_no_check_u64<const LENGTH: usize>(val: u64) -> [u8; LENGTH] {
+    let mut bytes: [u8; 8] = val.to_be_bytes();
+    bytes[(8-LENGTH)] |= 1 << (8 - LENGTH);
+    bytes[(8-LENGTH)..].try_into().expect("8 - (8-length) != length !?!?")
 }
 
 /// 
@@ -400,7 +408,7 @@ mod tests {
 
     #[test]
     fn write_vint_very_long() {
-        let result = 1u64.as_vint_with_length(8).expect("Writing vint failed");
+        let result = 1u64.as_vint_with_length::<8>().expect("Writing vint failed");
         assert_eq!(vec![1, 0, 0, 0, 0, 0, 0, 1], result);
     }
 
