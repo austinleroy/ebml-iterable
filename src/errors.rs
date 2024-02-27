@@ -120,6 +120,27 @@ pub mod tag_iterator {
             /// 
             size: usize 
         },
+
+        ///
+        /// An error indicating the reader found a tag with an invalid size.
+        /// 
+        InvalidTagSize { 
+            
+            ///
+            /// The position of the element.
+            /// 
+            position: usize, 
+            
+            ///
+            /// The id of the tag that was found.
+            /// 
+            tag_id: u64, 
+            
+            ///
+            /// The size of the tag that was found.
+            /// 
+            size: usize 
+        },
     }
 
     impl fmt::Display for CorruptedFileError {
@@ -141,7 +162,12 @@ pub mod tag_iterator {
                     position, 
                     tag_id, 
                     size : _
-                } => write!(f, "Found an oversized tag [0x{tag_id:x?}] at position {position}")
+                } => write!(f, "Found an oversized tag [0x{tag_id:x?}] at position {position}"),
+                CorruptedFileError::InvalidTagSize { 
+                    position, 
+                    tag_id, 
+                    size,
+                } => write!(f, "Found an oversized tag [0x{tag_id:x?}] at position {position} with size {size}.  Max supported size is 8GB."),
             }
         }
     }

@@ -4,7 +4,7 @@ pub mod corrupt_data_tests {
     use ebml_iterable::error::{TagIteratorError, CorruptedFileError};
     use ebml_iterable::iterator::AllowableErrors;
     use ebml_iterable::specs::Master;
-    use ebml_iterable::{TagIterator, TagWriter};
+    use ebml_iterable::{TagIterator, TagWriter, WriteOptions};
     use std::io::Cursor;
 
     use super::test_spec::TestSpec;
@@ -119,6 +119,48 @@ pub mod corrupt_data_tests {
         let mut reader: TagIterator<_, TestSpec> = TagIterator::new(&mut cursor, &[]);
         reader.allow_errors(&[AllowableErrors::OversizedTags]);
         reader.for_each(|t| assert!(t.is_ok()));
+    }
+
+    fn get_data_with_6_byte_tag() -> Cursor<Vec<u8>> {
+        let tags: Vec<TestSpec> = vec![
+            TestSpec::Segment(Master::Start),
+            TestSpec::Cluster(Master::Start),
+            TestSpec::Block(vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06]),
+            TestSpec::Cluster(Master::End),
+            TestSpec::Segment(Master::End),
+        ];
+
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        for tag in tags.iter() {
+            if matches!(tag, TestSpec::Segment(_)) || matches!(tag, TestSpec::Cluster(_)) {
+                writer.write_advanced(tag, WriteOptions::is_unknown_sized_element()).expect("Test shouldn't error");
+            } else {
+                writer.write(tag).expect("Test shouldn't error");
+            }
+        }
+
+        // // Rewrite size of block element
+        // dest.get_mut()[25] = 0x09;
+        // dest.get_mut()[26] = 0x65;
+        // dest.get_mut()[27] = 0xa0;
+        // dest.get_mut()[28] = 0xbc;
+        // dest.get_mut()[29] = 0x00;
+
+        println!("dest {:x?}", dest);
+        dest.set_position(0);
+        dest
+    }
+
+    #[test]
+    pub fn error_on_oversized_tag() {
+        let mut cursor = get_data_with_6_byte_tag();
+        let mut reader: TagIterator<_, TestSpec> = TagIterator::new(&mut cursor, &[]);
+        reader.set_max_allowable_tag_size(Some(5));
+        assert!(reader.next().unwrap().is_ok());
+        assert!(reader.next().unwrap().is_ok());
+        assert!(matches!(reader.next().unwrap(), Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagSize{position: _, tag_id: _, size: _}))));
     }
 
     #[test]

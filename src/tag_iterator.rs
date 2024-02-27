@@ -56,6 +56,7 @@ pub struct TagIterator<R: Read, TSpec>
     source: R,
     tag_ids_to_buffer: HashSet<u64>,
     allowed_errors: u8,
+    max_allowed_tag_size: Option<usize>,
 
     buffer: Box<[u8]>,
     buffer_offset: Option<usize>,
@@ -93,6 +94,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             source,
             tag_ids_to_buffer: tags_to_buffer.iter().map(|tag| tag.get_id()).collect(),
             allowed_errors: 0,
+            max_allowed_tag_size: Some(4 * usize::pow(1000, 3)), // 4GB
             buffer: buffer.into_boxed_slice(),
             buffered_byte_length: 0,
             buffer_offset: None,
@@ -123,6 +125,15 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             AllowableErrors::HierarchyProblems => a | INVALID_HIERARCHY_ERROR,
             AllowableErrors::OversizedTags => a | OVERSIZED_CHILD_ERROR,
         });
+    }
+
+    ///
+    /// Configures the maximum size a tag is allowed to be before the iterator considers it invalid.
+    ///
+    /// By default (as of v0.6.1), the iterator will throw an [`CorruptedFileError::InvalidTagSize`] error if it comes across any tags that declare their data to be more than 4GB.  This method can be used to change (and optionally remove) this behavior.  Note that increasing this size can potentially result in massive allocations, causing delays and panics.
+    ///
+    pub fn set_max_allowable_tag_size(&mut self, size: Option<usize>) {
+        self.max_allowed_tag_size = size;
     }
 
     ///
@@ -305,6 +316,12 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
         if (self.allowed_errors & OVERSIZED_CHILD_ERROR == 0) && size.is_known() && self.is_invalid_tag_size(header_len + size.value()) {
             return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::OversizedChildElement{ position: self.current_offset(), tag_id, size: size.value()}));
+        }
+
+        if let Some(max_size) = self.max_allowed_tag_size {
+            if size.is_known() && size.value() > max_size {
+                return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagSize { position: self.current_offset(), tag_id, size: size.value() }));
+            }
         }
 
         Ok((tag_id, spec_tag_type, size, header_len))

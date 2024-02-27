@@ -6,7 +6,7 @@ binary version of XML. It's used for container formats like [WebM][webm] or
 
 ```Cargo.toml
 [dependencies]
-ebml-iterable = "0.6.0"
+ebml-iterable = "0.6.1"
 ```
 
 # Usage
