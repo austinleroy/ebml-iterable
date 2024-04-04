@@ -227,6 +227,49 @@ pub mod spec_write_read {
     }
 
     #[test]
+    pub fn eof_on_tag_size() {
+        let tags: Vec<TestSpec> = vec![
+            TestSpec::Segment(Master::Start),
+            TestSpec::TrackType(0x01),
+            TestSpec::Cluster(Master::Start),
+            TestSpec::CueRefCluster(3),
+            TestSpec::Count(1),
+            TestSpec::Block(vec![0, 1, 2, 3, 4, 5, 6, 7]),
+            TestSpec::Block(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+            TestSpec::Cluster(Master::End),
+            TestSpec::Segment(Master::End),
+        ];
+
+        let mut dest = Cursor::new(Vec::new());
+        let mut writer = TagWriter::new(&mut dest);
+
+        for tag in tags.iter() {
+            writer.write(tag).expect("Test shouldn't error");
+        }
+
+        println!("dest {:x?}", dest);
+
+        let mut src = Cursor::new(dest.get_ref()[0..31].to_vec());
+        let reader = TagIterator::with_capacity(&mut src, &[], 10);
+        let mut iter = reader.into_iter().skip_while(|x: &Result<TestSpec, TagIteratorError>| x.is_ok());
+
+        let err = iter.next().expect("Shouldn't have reached end of data");
+        
+        match err.expect_err("Should be an error") {
+            TagIteratorError::UnexpectedEOF { tag_start, tag_id, tag_size, partial_data: _ } => {
+                println!("got error - {tag_start}, {tag_id:?}, {tag_size:?}");
+                assert_eq!(tag_start, 30);
+                assert_eq!(tag_id, Some(TestSpec::Block(vec![]).get_id()));
+                assert_eq!(tag_size, None);
+            },
+            other => {
+                println!("{other:?}");
+                assert!(false);
+            }
+        }
+    }
+
+    #[test]
     pub fn allow_start_reading_not_at_root() {
         let tags: Vec<TestSpec> = vec![
             TestSpec::Segment(Master::Start),

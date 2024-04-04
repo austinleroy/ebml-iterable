@@ -269,10 +269,14 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
         self.ensure_data_read(16)?;
         let (tag_id, id_len) = self.peek_tag_id()?;
         let spec_tag_type = <TSpec>::get_tag_data_type(tag_id);
-
+        
         let (size, size_len) = tools::read_vint(&self.buffer[(self.internal_buffer_position + id_len)..])
-                .or(Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData{tag_id, position: self.current_offset() })))?
-                .ok_or(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: Some(tag_id), tag_size: None, partial_data: None })?;
+        .or(Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData{tag_id, position: self.current_offset() })))?
+        .ok_or(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: Some(tag_id), tag_size: None, partial_data: None })?;
+    
+        if self.buffered_byte_length <= id_len + size_len {
+            return Err(TagIteratorError::UnexpectedEOF { tag_start: self.current_offset(), tag_id: Some(tag_id), tag_size: None, partial_data: None });
+        }
 
         if matches!(spec_tag_type, Some(TagDataType::UnsignedInt) | Some(TagDataType::Integer) | Some(TagDataType::Float)) && size > 8 {
             return Err(TagIteratorError::CorruptedFileData(CorruptedFileError::InvalidTagData{tag_id, position: self.current_offset() }));
