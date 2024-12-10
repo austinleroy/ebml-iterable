@@ -50,4 +50,8 @@ impl<R: AsyncRead + Unpin, TSpec> TagIteratorAsync<R, TSpec>
             next.map(move |it| (it, read))
         })
     }
+
+    pub fn last_emitted_tag_offset(&self) -> usize {
+        self.iterator.last_emitted_tag_offset()
+    }
 }

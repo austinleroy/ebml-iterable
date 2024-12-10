@@ -460,9 +460,9 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
             self.emission_queue.push_back(next_read.map(|r| (r.tag, r.tag_start)));
         } else {
-            while let Some(tag) = self.tag_stack.pop() {
-                self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
-            }
+            // while let Some(tag) = self.tag_stack.pop() {
+            //     self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
+            // }
         }
     }
 
