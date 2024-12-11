@@ -66,6 +66,8 @@ pub struct TagIterator<R: Read, TSpec>
     emission_queue: VecDeque<Result<(TSpec, usize), TagIteratorError>>,
     last_emitted_tag_offset: usize,
     has_determined_doc_path: bool,
+
+    emit_master_end_when_eof: bool,
 }
 
 impl<R: Read, TSpec> TagIterator<R, TSpec>
@@ -103,6 +105,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             emission_queue: VecDeque::new(),
             last_emitted_tag_offset: 0,
             has_determined_doc_path: false,
+            emit_master_end_when_eof: false,
         }
     }
 
@@ -199,6 +202,13 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     /// 
     pub fn last_emitted_tag_offset(&self) -> usize {
         self.last_emitted_tag_offset
+    }
+
+    ///
+    /// set weather the iterator should emit a master end tag when it reaches the end of the file, default is false
+    /// 
+    pub fn emit_master_end_when_eof(&mut self, emit: bool) {
+        self.emit_master_end_when_eof = emit;
     }
 
     #[inline(always)]
@@ -460,9 +470,11 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
 
             self.emission_queue.push_back(next_read.map(|r| (r.tag, r.tag_start)));
         } else {
-            // while let Some(tag) = self.tag_stack.pop() {
-            //     self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
-            // }
+            if self.emit_master_end_when_eof {
+                while let Some(tag) = self.tag_stack.pop() {
+                    self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
+                }
+            }
         }
     }
 
