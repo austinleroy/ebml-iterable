@@ -56,7 +56,6 @@ impl WriteOptions {
 ///
 /// Unlike the [`TagIterator`][`super::TagIterator`], this does not require a specification to write data. This writer provides the [`write_raw()`](#method.write_raw) method which can be used to write data that is outside of any specification.  The regular [`write()`](#method.write) method can be used to write any `TSpec` objects regardless of whether they came from a [`TagIterator`][`super::TagIterator`] or not.
 ///
-
 pub struct TagWriter<W: Write>
 {
     dest: W,

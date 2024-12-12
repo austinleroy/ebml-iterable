@@ -48,7 +48,6 @@ const OVERSIZED_CHILD_ERROR        : u8 = 0x04;
 ///
 /// The iterator can panic if `<TSpec>` is an internally inconsistent specification (i.e. it claims that a specific tag id has a specific data type but fails to produce a tag variant using data of that type).  This won't happen if the specification being used was created using the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) attribute macro.
 ///
-
 pub struct TagIterator<R: Read, TSpec>
     where
     TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone
@@ -205,7 +204,11 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     }
 
     ///
-    /// set weather the iterator should emit a master end tag when it reaches the end of the file, default is true
+    /// Control whether the iterator should emit closing tags when it reaches EOF.
+    /// 
+    /// By default, the iterator will emit [`Master::End`] items for all currently open tags when it reaches the end of the file.  You may override this behavior by passing `false` to this method.
+    /// 
+    /// This is recommended if you supply a [`std::io::Read`] source that can supply more data after reaching EOF, as in some streaming scenarios.
     /// 
     pub fn emit_master_end_when_eof(&mut self, emit: bool) {
         self.emit_master_end_when_eof = emit;
@@ -469,11 +472,9 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             }
 
             self.emission_queue.push_back(next_read.map(|r| (r.tag, r.tag_start)));
-        } else {
-            if self.emit_master_end_when_eof {
-                while let Some(tag) = self.tag_stack.pop() {
-                    self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
-                }
+        } else if self.emit_master_end_when_eof {
+            while let Some(tag) = self.tag_stack.pop() {
+                self.emission_queue.push_back(Ok((tag.tag, tag.tag_start)));
             }
         }
     }
