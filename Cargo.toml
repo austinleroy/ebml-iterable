@@ -1,6 +1,6 @@
 [package]
 name = "ebml-iterable"
-version = "0.6.2"
+version = "0.6.3"
 authors = ["Austin Blake <austinl3roy@gmail.com>"]
 edition = "2018"
 description = "This crate provides an iterator over EBML encoded data.  The items provided by the iterator are Tags as defined in EBML.  The iterator is spec-agnostic and requires a specification implementing specific traits to read files.  Typically, you would only use this crate to implement a custom specification - most often you would prefer a crate providing an existing specification, like `webm-iterable`."

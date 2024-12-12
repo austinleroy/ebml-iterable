@@ -6,7 +6,7 @@ binary version of XML. It's used for container formats like [WebM][webm] or
 
 ```Cargo.toml
 [dependencies]
-ebml-iterable = "0.6.2"
+ebml-iterable = "0.6.3"
 ```
 
 # Usage
@@ -48,7 +48,7 @@ TagDataType is an enum containing the possible data types stored within a tag.  
   * Binary: Binary data, otherwise uninterpreted.
   * Float: IEEE-754 floating point number.
 
-> Note: This library made a concious decision to not parse "Date" elements from EBML due to lack of built-in support for dates in Rust. Specification implementations should treat Date elements as Binary so that consumers have the option of parsing the unaltered data using their library of choice, if needed.
+> Note: This library made a conscious decision to not parse "Date" elements from EBML due to lack of built-in support for dates in Rust. Specification implementations should treat Date elements as Binary so that consumers have the option of parsing the unaltered data using their library of choice, if needed.
 
 # Specification Implementation
 
