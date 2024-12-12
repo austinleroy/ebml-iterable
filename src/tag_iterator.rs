@@ -105,7 +105,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
             emission_queue: VecDeque::new(),
             last_emitted_tag_offset: 0,
             has_determined_doc_path: false,
-            emit_master_end_when_eof: false,
+            emit_master_end_when_eof: true,
         }
     }
 
@@ -205,7 +205,7 @@ impl<R: Read, TSpec> TagIterator<R, TSpec>
     }
 
     ///
-    /// set weather the iterator should emit a master end tag when it reaches the end of the file, default is false
+    /// set weather the iterator should emit a master end tag when it reaches the end of the file, default is true
     /// 
     pub fn emit_master_end_when_eof(&mut self, emit: bool) {
         self.emit_master_end_when_eof = emit;
