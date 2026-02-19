@@ -106,10 +106,12 @@ impl<W: Write> TagWriter<W>
         self.open_tags.push((id, Known(self.working_buffer.len()), size_length));
     }
 
-    fn start_unknown_size_tag(&mut self, id: u64) {
+    fn start_unknown_size_tag(&mut self, id: u64) -> usize {
+        let previous_buffer_size = self.working_buffer.len();
         self.working_buffer.extend(id.to_be_bytes().iter().skip_while(|&v| *v == 0u8));
         self.working_buffer.extend_from_slice(&(u64::MAX >> 7).to_be_bytes());
         self.open_tags.push((id, Unknown, 0));
+        self.working_buffer.len().checked_sub(previous_buffer_size).expect("working_buffer shrank")
     }
 
     fn end_tag(&mut self, id: u64) -> Result<(), TagWriterError> {
@@ -288,6 +290,8 @@ impl<W: Write> TagWriter<W>
     ///
     /// This method writes a tag from any specification.  There are no restrictions on the type of specification being written - it simply needs to implement the [`EbmlSpecification`] and [`EbmlTag`] traits.
     ///
+    /// Returns the number of bytes written.
+    ///
     /// ## Errors
     /// 
     /// This method can error if there is a problem writing the input tag.  The different possible error states are enumerated in [`TagWriterError`].
@@ -315,7 +319,7 @@ impl<W: Write> TagWriter<W>
     /// # }
     /// ```
     ///
-    pub fn write<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<(), TagWriterError> {
+    pub fn write<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec) -> Result<usize, TagWriterError> {
         self.write_advanced(tag, WriteOptions { size_byte_length: None, unknown_sized_element: false })
     }
 
@@ -323,6 +327,8 @@ impl<W: Write> TagWriter<W>
     /// Write a tag to this instance's destination using advanced options.
     /// 
     /// This method is just like the normal [`write()`](#method.write) method, but allows for tailoring the output binary to better suit your needs.  See [`WriteOptions`] for more detail on available options.
+    ///
+    /// Returns the number of bytes written.
     /// 
     /// ## Errors
     /// 
@@ -332,7 +338,7 @@ impl<W: Write> TagWriter<W>
     ///
     /// This method can panic if `<TSpec>` is an internally inconsistent specification (i.e. it claims that a specific tag variant is a specific data type but it is not).  This won't happen if the specification being used was created using the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) attribute macro.
     /// 
-    pub fn write_advanced<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec, options: WriteOptions) -> Result<(), TagWriterError> {
+    pub fn write_advanced<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone>(&mut self, tag: &TSpec, options: WriteOptions) -> Result<usize, TagWriterError> {
         let tag_id = tag.get_id();
         let tag_type = TSpec::get_tag_data_type(tag_id);
 
@@ -343,7 +349,7 @@ impl<W: Write> TagWriter<W>
                     return Err(TagWriterError::TagSizeError(format!("Cannot write an unknown size for tag of type {tag_type:?}")))
                 }
             };
-            self.start_unknown_size_tag(tag_id);
+            Ok(self.start_unknown_size_tag(tag_id))
         } else {
             let should_validate = tag_type.is_some() && (!matches!(tag_type, Some(TagDataType::Master)) || !matches!(tag.as_master().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was master, but could not get tag!", tag_id)), Master::End));
             if should_validate && !validate_tag_path::<TSpec>(tag_id, self.open_tags.iter().copied()) {
@@ -351,23 +357,22 @@ impl<W: Write> TagWriter<W>
             }
 
             match options.size_byte_length {
-                Some(1) => self.write_explicit_sized::<TSpec, 1>(tag, tag_id, tag_type)?,
-                Some(2) => self.write_explicit_sized::<TSpec, 2>(tag, tag_id, tag_type)?,
-                Some(3) => self.write_explicit_sized::<TSpec, 3>(tag, tag_id, tag_type)?,
-                Some(4) => self.write_explicit_sized::<TSpec, 4>(tag, tag_id, tag_type)?,
-                Some(5) => self.write_explicit_sized::<TSpec, 5>(tag, tag_id, tag_type)?,
-                Some(6) => self.write_explicit_sized::<TSpec, 6>(tag, tag_id, tag_type)?,
-                Some(7) => self.write_explicit_sized::<TSpec, 7>(tag, tag_id, tag_type)?,
-                Some(8) => self.write_explicit_sized::<TSpec, 8>(tag, tag_id, tag_type)?,
-                _ => self.write_explicit_sized::<TSpec, 0>(tag, tag_id, tag_type)?,
+                Some(1) => self.write_explicit_sized::<TSpec, 1>(tag, tag_id, tag_type),
+                Some(2) => self.write_explicit_sized::<TSpec, 2>(tag, tag_id, tag_type),
+                Some(3) => self.write_explicit_sized::<TSpec, 3>(tag, tag_id, tag_type),
+                Some(4) => self.write_explicit_sized::<TSpec, 4>(tag, tag_id, tag_type),
+                Some(5) => self.write_explicit_sized::<TSpec, 5>(tag, tag_id, tag_type),
+                Some(6) => self.write_explicit_sized::<TSpec, 6>(tag, tag_id, tag_type),
+                Some(7) => self.write_explicit_sized::<TSpec, 7>(tag, tag_id, tag_type),
+                Some(8) => self.write_explicit_sized::<TSpec, 8>(tag, tag_id, tag_type),
+                _ => self.write_explicit_sized::<TSpec, 0>(tag, tag_id, tag_type),
             }
         }
-
-        Ok(())
     }
 
-    fn write_explicit_sized<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone, const SIZE_LENGTH: usize>(&mut self, tag: &TSpec, tag_id: u64, tag_type: Option<TagDataType>) -> Result<(), TagWriterError> {
+    fn write_explicit_sized<TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone, const SIZE_LENGTH: usize>(&mut self, tag: &TSpec, tag_id: u64, tag_type: Option<TagDataType>) -> Result<usize, TagWriterError> {
         assert!(SIZE_LENGTH < 9, "Vint length must be less than 9 bytes");
+        let previous_buffer_size = self.working_buffer.len();
         match tag_type {
             Some(TagDataType::UnsignedInt) => {
                 let val = tag.as_unsigned_int().unwrap_or_else(|| panic!("Bad specification implementation: Tag id {} type was unsigned int, but could not get tag!", tag_id));
@@ -412,13 +417,14 @@ impl<W: Write> TagWriter<W>
                     self.write_binary_tag::<SIZE_LENGTH>(tag_id, val)?
                 }
             }
-        }
+        };
+
+        let bytes_written = self.working_buffer.len().checked_sub(previous_buffer_size).expect("working_buffer shrank");
 
         if !self.open_tags.iter().any(|t| matches!(t.1, Known(_))) {
-            self.private_flush()
-        } else {
-            Ok(())
+            self.private_flush()?;
         }
+        Ok(bytes_written)
     }
 
     ///

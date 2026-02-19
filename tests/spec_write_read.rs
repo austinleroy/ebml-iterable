@@ -20,12 +20,14 @@ pub mod spec_write_read {
 
         let mut dest = Cursor::new(Vec::new());
         let mut writer = TagWriter::new(&mut dest);
+        let mut bytes_written = 0;
 
         for tag in tags.iter() {
-            writer.write(tag).expect("Test shouldn't error");
+            bytes_written += writer.write(tag).expect("Test shouldn't error");
         }
 
         println!("dest {:?}", dest);
+        assert_eq!(dest.get_ref().len(), bytes_written);
 
         let mut src = Cursor::new(dest.get_ref().to_vec());
         let reader = TagIterator::new(&mut src, &[]);
@@ -48,12 +50,14 @@ pub mod spec_write_read {
 
         let mut dest = Cursor::new(Vec::new());
         let mut writer = TagWriter::new(&mut dest);
+        let mut bytes_written = 0;
 
         for tag in tags.iter() {
-            writer.write(tag).expect("Test shouldn't error");
+            bytes_written += writer.write(tag).expect("Test shouldn't error");
         }
 
         println!("dest {:?}", dest);
+        assert_eq!(dest.get_ref().len(), bytes_written);
 
         let mut src = Cursor::new(dest.get_ref().to_vec());
         let reader = TagIterator::new(&mut src, &[TestSpec::Cluster(Master::Start)]);
