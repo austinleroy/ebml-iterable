@@ -309,6 +309,10 @@ pub fn arr_to_i64(arr: &[u8]) -> Result<i64, ToolError> {
         return Err(ToolError::ReadI64Overflow(Vec::from(arr)));
     }
 
+    if arr.is_empty() {
+        return Ok(0);
+    }
+
     if arr[0] > 127 {
         if arr.len() == 8 {
             Ok(i64::from_be_bytes(arr.try_into().expect("[u8;8] should be convertible to i64")))
@@ -342,6 +346,21 @@ pub fn arr_to_f64(arr: &[u8]) -> Result<f64, ToolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arr_to_i64_empty_returns_zero_not_panic() {
+        // Regression: previously `arr[0]` indexed past an empty slice,
+        // panicking with "index out of bounds: the len is 0 but the
+        // index is 0" (downstream from libFuzzer-found malformed
+        // EBML payloads via webm-iterable).
+        assert_eq!(arr_to_i64(&[]).unwrap(), 0);
+    }
+
+    #[test]
+    fn arr_to_u64_empty_returns_zero() {
+        // Already worked by structure; pin the contract.
+        assert_eq!(arr_to_u64(&[]).unwrap(), 0);
+    }
 
     #[test]
     fn read_vint_sixteen() {
