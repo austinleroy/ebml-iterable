@@ -6,6 +6,7 @@ binary version of XML. It's used for container formats like [WebM][webm] or
 
 ```Cargo.toml
 [dependencies]
+bytes = "1"
 ebml-iterable = "0.6.3"
 ```
 
@@ -17,6 +18,23 @@ This struct can be created with the `new` function on any source that implements
 > Note: The `with_capacity` method can be used to construct a `TagIterator` with a specified default buffer size.  This is only useful as a microoptimization to memory management if you know the maximum tag size of the file you're reading.
 
 The data in the tag can then be modified as desired (encryption, compression, etc.) and reencoded using the `TagWriter` struct. This struct can be created with the `new` function on any source that implements the standard [Write][rust-write] trait. Once created, this struct can encode EBML using the `write` method on any objects that implement `EbmlSpecification` and `EbmlTag` regardless of whether they came from a `TagIterator`.  This will emit binary EBML to the underlying `Write` destination.
+
+Use `TagDecoder` when data arrives over time and a temporary lack of bytes is not the end of the stream:
+
+```rs
+use bytes::BytesMut;
+use ebml_iterable::TagDecoder;
+
+let mut input = BytesMut::new();
+let mut decoder = TagDecoder::<MySpec>::new(&[]);
+
+input.extend_from_slice(next_chunk);
+while let Some(tag) = decoder.decode(&mut input)? {
+    handle(tag);
+}
+```
+
+Call `decode_eof` instead of `decode` after the input has permanently ended.
 
 ## Master Enum
 

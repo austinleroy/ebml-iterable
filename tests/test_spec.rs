@@ -36,6 +36,8 @@ pub enum TestSpec {
     Cluster(ebml_iterable::specs::Master<TestSpec>),
     CueRefCluster(u64),
     Count(u64),
+    Signed(i64),
+    Float(f64),
     Block(::std::vec::Vec<u8>),
     SimpleBlock(::std::vec::Vec<u8>),
     Crc32(::std::vec::Vec<u8>),
@@ -56,6 +58,8 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
             524531317u64 => Some(TagDataType::Master),
             151u64 => Some(TagDataType::UnsignedInt),
             16640u64 => Some(TagDataType::UnsignedInt),
+            132u64 => Some(TagDataType::Integer),
+            133u64 => Some(TagDataType::Float),
             161u64 => Some(TagDataType::Binary),
             163u64 => Some(TagDataType::Binary),
             191u64 => Some(ebml_iterable::specs::TagDataType::Binary),
@@ -105,8 +109,9 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
             _ => None,
         }
     }
-    fn get_signed_int_tag(id: u64, _data: i64) -> Option<TestSpec> {
+    fn get_signed_int_tag(id: u64, data: i64) -> Option<TestSpec> {
         match id {
+            132u64 => Some(TestSpec::Signed(data)),
             _ => None,
         }
     }
@@ -125,8 +130,9 @@ impl ebml_iterable::specs::EbmlSpecification<TestSpec> for TestSpec {
             _ => None,
         }
     }
-    fn get_float_tag(id: u64, _data: f64) -> Option<TestSpec> {
+    fn get_float_tag(id: u64, data: f64) -> Option<TestSpec> {
         match id {
+            133u64 => Some(TestSpec::Float(data)),
             _ => None,
         }
     }
@@ -158,6 +164,8 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
             TestSpec::Cluster(_) => 524531317u64,
             TestSpec::CueRefCluster(_) => 151u64,
             TestSpec::Count(_) => 16640u64,
+            TestSpec::Signed(_) => 132u64,
+            TestSpec::Float(_) => 133u64,
             TestSpec::Block(_) => 161u64,
             TestSpec::SimpleBlock(_) => 163u64,
             TestSpec::Crc32(_) => 191u64,
@@ -177,6 +185,7 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
     }
     fn as_signed_int(&self) -> Option<&i64> {
         match self {
+            TestSpec::Signed(val) => Some(val),
             _ => None,
         }
     }
@@ -198,6 +207,7 @@ impl ebml_iterable::specs::EbmlTag<TestSpec> for TestSpec {
     }
     fn as_float(&self) -> Option<&f64> {
         match self {
+            TestSpec::Float(val) => Some(val),
             _ => None,
         }
     }
