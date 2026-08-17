@@ -24,7 +24,9 @@
 //!
 
 mod errors;
+mod tag_decoder;
 mod tag_iterator;
+mod tag_parse;
 mod tag_writer;
 pub mod tools;
 pub mod specs;
@@ -34,6 +36,7 @@ mod spec_util;
 #[cfg(feature = "futures")]
 pub mod nonblocking;
 
+pub use self::tag_decoder::{PositionedTag, TagDecoder};
 pub use self::tag_iterator::TagIterator;
 pub use self::tag_writer::{TagWriter, WriteOptions};
 
