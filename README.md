@@ -7,7 +7,7 @@ binary version of XML. It's used for container formats like [WebM][webm] or
 ```Cargo.toml
 [dependencies]
 bytes = "1"
-ebml-iterable = "0.6.3"
+ebml-iterable = "0.7.0"
 ```
 
 # Usage
@@ -74,10 +74,13 @@ Any specification based on EBML can use this library to parse or write binary da
 
 # Features
  
-There is currently only one optional feature in this crate, but that may change over time as needs arise.
+There are currently two optional features in this crate.
  
 * **derive-spec** -
     When enabled, this provides a macro to simplify implementations of the `EbmlSpecification` and `EbmlTag` traits.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
+
+* **futures** -
+    Enables the async/nonblocking iterator support exposed by the `nonblocking` module. This allows `TagIteratorAsync` to work with sources implementing `futures::AsyncRead`.
 
 
 # State of this project

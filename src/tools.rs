@@ -120,7 +120,7 @@ pub fn is_vint(val: u64) -> bool {
         return false;
     }
 
-    (val.ilog2() % 7) == 0
+    val.ilog2().is_multiple_of(7)
 }
 
 ///
@@ -307,6 +307,10 @@ pub fn arr_to_u64(arr: &[u8]) -> Result<u64, ToolError> {
 pub fn arr_to_i64(arr: &[u8]) -> Result<i64, ToolError> {
     if arr.len() > 8 {
         return Err(ToolError::ReadI64Overflow(Vec::from(arr)));
+    }
+
+    if arr.is_empty() {
+        return Ok(0);
     }
 
     if arr[0] > 127 {

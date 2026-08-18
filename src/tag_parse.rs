@@ -4,6 +4,16 @@ use crate::specs::{EbmlSpecification, EbmlTag, TagDataType};
 use crate::tag_iterator_util::EBMLSize;
 use crate::tools;
 
+/// A parsed EBML tag header.
+///
+/// This contains the parsed element identifier, the spec-inferred data type
+/// (if available), the element data size as an [`EBMLSize`], and the total
+/// header length in bytes (identifier + size descriptor).
+///
+/// The header is produced by [`read_header`]. The `data_type` field will be
+/// `None` for unknown tag ids (when the specification does not include the
+/// id). Consumers should treat that as an indicator that the element is a
+/// raw/unknown element unless their validation policy allows unknown ids.
 pub(crate) struct TagHeader {
     pub id: u64,
     pub data_type: Option<TagDataType>,
@@ -11,6 +21,12 @@ pub(crate) struct TagHeader {
     pub len: usize,
 }
 
+/// Attempts to parse an EBML tag identifier from the front of `input`.
+///
+/// Returns `Some((id, id_len))` when a complete identifier is available, where
+/// `id` is the numeric element id and `id_len` is the number of bytes consumed
+/// by the identifier. Returns `None` when `input` does not contain enough
+/// bytes to form a complete identifier.
 pub(crate) fn read_tag_id(input: &[u8]) -> Option<(u64, usize)> {
     let first = input.first().copied()?;
     let id_len = if first == 0 { 1 } else { 8 - first.ilog2() as usize };
@@ -24,6 +40,15 @@ pub(crate) fn read_tag_id(input: &[u8]) -> Option<(u64, usize)> {
     Some((id, id_len))
 }
 
+/// Attempts to read a full EBML tag header from the start of `input`.
+///
+/// This returns `Ok(None)` when there is not yet enough data in `input` to
+/// parse a complete header (identifier + size). When a header is available it
+/// returns `Ok(Some(TagHeader))`. Parsing errors that indicate corrupted file
+/// data are returned as `Err(TagIteratorError::CorruptedFileData(...))`.
+///
+/// `position` is the logical byte offset of `input` within the source stream
+/// and is used in produced error variants for better diagnostics.
 pub(crate) fn read_header<TSpec>(input: &[u8], position: usize) -> Result<Option<TagHeader>, TagIteratorError>
 where
     TSpec: EbmlSpecification<TSpec> + EbmlTag<TSpec> + Clone,
@@ -40,6 +65,7 @@ where
     };
     let data_type = TSpec::get_tag_data_type(id);
 
+    // Numeric types may be at most 8 bytes; reject larger sizes as corrupted.
     if matches!(
         data_type,
         Some(TagDataType::UnsignedInt | TagDataType::Integer | TagDataType::Float)
@@ -58,6 +84,22 @@ where
     }))
 }
 
+/// Converts raw element bytes into a typed tag variant as defined by `TSpec`.
+///
+/// `id` is the element id, `data_type` is the optional spec-provided data type
+/// (as returned by [`TSpec::get_tag_data_type`]) and `raw_data` is the element
+/// payload bytes (not including the header). If `data_type` is `None` the
+/// method returns a `RawTag` produced by the specification implementation.
+///
+/// Errors are returned when the raw bytes cannot be interpreted as the
+/// expected type (for example invalid UTF-8 for `Utf8` or wrong length for
+/// numeric types). These are returned as [`TagIteratorError::CorruptedTagData`].
+///
+/// # Panics
+///
+/// This function will panic if the specification implementation claims a
+/// particular `id` maps to a data type but fails to construct a tag variant
+/// for that id (i.e. the spec is internally inconsistent). 
 pub(crate) fn read_data_tag<TSpec>(
     id: u64,
     data_type: Option<TagDataType>,

@@ -413,4 +413,42 @@ where
             partial_data,
         }
     }
+
+    /// Attempts to recover from corrupted data by scanning forward in the provided
+    /// `BytesMut` until a header that passes validation is found.
+    ///
+    /// This consumes bytes from the front of `input` as it scans. This method will
+    /// return `true` if recovery was successful - if no valid data was found in the
+    /// input, `false` is returned instead.
+    pub fn try_recover(&mut self, input: &mut BytesMut) -> bool {
+        let original_position = self.position;
+
+        loop {
+            match tag_parse::read_header::<TSpec>(input, self.position) {
+                Ok(Some(header)) => {
+                    if self.validate_header(&header).is_ok() {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // Not enough data for a header yet
+                    return false;
+                }
+                Err(_) => {
+                    self.advance(input, 1);
+                }
+            }
+        }
+
+        // As part of recovery, update internal tag stack sizes so that we don't get
+        // "oversized children" errors after skipping corrupted data
+        let diff = self.position.saturating_sub(original_position);
+        for tag in self.tag_stack.iter_mut() {
+            if let EBMLSize::Known(size) = tag.size {
+                tag.size = EBMLSize::Known(size + diff);
+            }
+        }
+
+        true
+    }
 }

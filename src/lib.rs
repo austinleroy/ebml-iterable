@@ -11,10 +11,13 @@
 //!
 //! # Features
 //!
-//! There is currently only one optional feature in this crate, but that may change over time as needs arise.
+//! There are currently two optional features in this crate.
 //!
 //! * **derive-spec** -
-//!     When enabled, this provides the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) attribute macro to simplify implementation of the [`EbmlSpecification`][`specs::EbmlSpecification`] and [`EbmlTag`][`specs::EbmlTag`] traits.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
+//!   When enabled, this provides the [`#[ebml_specification]`](https://docs.rs/ebml-iterable-specification-derive/latest/ebml_iterable_specification_derive/attr.ebml_specification.html) attribute macro to simplify implementation of the [`EbmlSpecification`][`specs::EbmlSpecification`] and [`EbmlTag`][`specs::EbmlTag`] traits.  This introduces dependencies on [`syn`](https://crates.io/crates/syn), [`quote`](https://crates.io/crates/quote), and [`proc-macro2`](https://crates.io/crates/proc-macro2), so expect compile times to increase a little.
+//!
+//! * **futures** -
+//!   Enables the async/nonblocking iterator support in [`nonblocking`]. This exposes [`TagIteratorAsync`] and allows integration with [`futures::AsyncRead`] sources.
 //!
 //! [EBML]: http://ebml.sourceforge.net/
 //! [webm]: https://www.webmproject.org/

@@ -10,16 +10,8 @@ pub enum EBMLSize {
 
 impl EBMLSize {
     pub fn new(size: u64, vint_length: usize) -> Self {
-        match vint_length {
-            1 => if size == ((1 << (7))     - 1) { return Unknown; },
-            2 => if size == ((1 << (7 * 2)) - 1) { return Unknown; },
-            3 => if size == ((1 << (7 * 3)) - 1) { return Unknown; },
-            4 => if size == ((1 << (7 * 4)) - 1) { return Unknown; },
-            5 => if size == ((1 << (7 * 5)) - 1) { return Unknown; },
-            6 => if size == ((1 << (7 * 6)) - 1) { return Unknown; },
-            7 => if size == ((1 << (7 * 7)) - 1) { return Unknown; },
-            8 => if size == ((1 << (7 * 8)) - 1) { return Unknown; },
-            _ => {},
+        if size == ((1 << (7 * vint_length)) - 1) {
+            return Unknown;
         }
 
         match size.try_into() {
