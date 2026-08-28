@@ -23,19 +23,19 @@ pub trait Vint: Into<u64> + Copy {
         let val: u64 = self.into();
         check_size_u64(val, 8)?;
 
-        if val < (1 << 7) {
+        if val < (1 << 7) - 1 {
             Ok(as_vint_no_check_u64::<1>(val).to_vec())
-        } else if val < (1 << (7 * 2)) {
+        } else if val < (1 << (7 * 2)) - 1 {
             Ok(as_vint_no_check_u64::<2>(val).to_vec())
-        } else if val < (1 << (7 * 3)) {
+        } else if val < (1 << (7 * 3)) - 1 {
             Ok(as_vint_no_check_u64::<3>(val).to_vec())
-        } else if val < (1 << (7 * 4)) {
+        } else if val < (1 << (7 * 4)) - 1 {
             Ok(as_vint_no_check_u64::<4>(val).to_vec())
-        } else if val < (1 << (7 * 5)) {
+        } else if val < (1 << (7 * 5)) - 1 {
             Ok(as_vint_no_check_u64::<5>(val).to_vec())
-        } else if val < (1 << (7 * 6)) {
+        } else if val < (1 << (7 * 6)) - 1 {
             Ok(as_vint_no_check_u64::<6>(val).to_vec())
-        } else if val < (1 << (7 * 7)) {
+        } else if val < (1 << (7 * 7)) - 1 {
             Ok(as_vint_no_check_u64::<7>(val).to_vec())
         } else {
             Ok(as_vint_no_check_u64::<8>(val).to_vec())
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn write_vint_one_twenty_seven() {
         let result = 127u64.as_vint().expect("Writing vint failed");
-        assert_eq!(vec![255u8], result);
+        assert_eq!(vec![0x40, 0x7f], result); // 0xff is a 1-byte "UNKNOWN SIZE" VINT
     }
 
     #[test]
