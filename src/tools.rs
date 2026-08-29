@@ -348,6 +348,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn arr_to_i64_empty_returns_zero_not_panic() {
+        // Regression: previously `arr[0]` indexed past an empty slice,
+        // panicking with "index out of bounds: the len is 0 but the
+        // index is 0" (downstream from libFuzzer-found malformed
+        // EBML payloads via webm-iterable).
+        assert_eq!(arr_to_i64(&[]).unwrap(), 0);
+    }
+
+    #[test]
+    fn arr_to_u64_empty_returns_zero() {
+        // Already worked by structure; pin the contract.
+        assert_eq!(arr_to_u64(&[]).unwrap(), 0);
+    }
+
+    #[test]
     fn read_vint_sixteen() {
         let buffer = [144];
         let result = read_vint(&buffer).unwrap().expect("Reading vint failed");
